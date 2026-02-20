@@ -13,8 +13,12 @@ const SplashScreen = () => {
   }, [navigate]);
 
   return (
-    <div className="w-[395px] h-[730px] bg-white mx-auto flex items-center justify-center">
-      <img src={logoLong} alt="FinSight" className="w-48 h-auto" />
+    <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4">
+      <div className="w-[395px] bg-white rounded-[30px] shadow-xl overflow-hidden relative">
+        <div className="h-[730px] flex items-center justify-center">
+          <img src={logoLong} alt="FinSight" className="w-64 h-auto" />
+        </div>
+      </div>
     </div>
   );
 };

@@ -3,11 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "dompurify": "^3.3.1",
+    "jspdf": "^4.2.0",
+    "jspdf-autotable": "^5.0.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.0"
   },
   "devDependencies": {
+    "@types/dompurify": "^3.0.5",
     "autoprefixer": "^10.4.17",
     "postcss": "^8.4.35",
     "react-scripts": "^5.0.1",
