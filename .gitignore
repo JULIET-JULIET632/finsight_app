@@ -1,2 +1,12 @@
+# Your local changes
 .env
 node_modules
+# Logs
+logs
+*.log
+npm-debug.log
+# (and so on...)
+# Remote content starts here
+.env.*
+!.env.example
+# (and so on...)
