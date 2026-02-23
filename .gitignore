@@ -9,4 +9,4 @@ npm-debug.log
 # Remote content starts here
 .env.*
 !.env.example
-# (and so on...)
+# (and so on...)__pycache__/
