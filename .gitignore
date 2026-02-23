@@ -10,3 +10,4 @@ npm-debug.log
 .env.*
 !.env.example
 # (and so on...)__pycache__/
+.DS_Store
