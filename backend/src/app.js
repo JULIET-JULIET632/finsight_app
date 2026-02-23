@@ -18,15 +18,27 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // 3. Request Logging (The "Traffic Monitor")
+// app.use((req, res, next) => {
+//   console.log(`\n--- ${new Date().toLocaleTimeString()} ---`);
+//   console.log(`${req.method} ${req.url}`);
+//   if (Object.keys(req.body).length > 0) {
+//     console.log("Body Keys:", Object.keys(req.body));
+//   }
+//   next();
+// });
+
 app.use((req, res, next) => {
   console.log(`\n--- ${new Date().toLocaleTimeString()} ---`);
   console.log(`${req.method} ${req.url}`);
-  if (Object.keys(req.body).length > 0) {
-    console.log("Body Keys:", Object.keys(req.body));
+
+  const body = req.body ?? {};
+
+  if (Object.keys(body).length > 0) {
+    console.log("Body Keys:", Object.keys(body));
   }
+
   next();
 });
-
 // 4. API Health Check (Good for testing if the server is live)
 app.get("/health", (req, res) => res.status(200).send("Finsight Backend is Online"));
 
@@ -35,5 +47,6 @@ app.use("/api", finsightRoutes);
 
 // 6. Global Error Handler
 app.use(errorHandler);
+
 
 export default app;
