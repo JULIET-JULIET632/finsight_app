@@ -6,7 +6,7 @@ const groq = new Groq();
 export const getDiagnosis = async (req, res, next) => {
   try {
     // 1. Get the math and metrics from your Python ML service
-    const diagnosisData = await fetchMLDiagnosis(req.body);
+    const diagnosisData = await fetchMLDiagnosis(req.body, 'diagnose');
 
     // --- SAFETY NET ---
     if (!diagnosisData) {

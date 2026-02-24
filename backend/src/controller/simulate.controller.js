@@ -25,7 +25,7 @@ export const simulate = async (req, res, next) => {
     });
 
     // 2. Get the new projected score
-    const result = await fetchMLDiagnosis(adjusted);
+    const result = await fetchMLDiagnosis(adjusted, 'simulate');
     const newScore = result.health_score;
 
     let aiBenefits = [];
