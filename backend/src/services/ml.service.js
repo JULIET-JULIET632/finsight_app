@@ -13,7 +13,7 @@ export const fetchMLDiagnosis = async (businessData) => {
       headers: {
         "Content-Type": "application/json",
       },
-      timeout: 5000, // 5 second timeout to keep the app snappy
+      timeout: 60000, // 5 second timeout to keep the app snappy
     });
 
     // We return the raw data (health_score, breakdown, simulation_impacts, etc.)
