@@ -142,7 +142,6 @@ def predict(data: BusinessInput):
     }
     
     for slider, impact in slider_impacts.items():
-        # Determine if this specific metric is already optimal
         is_optimal = False
         if slider == "inventory_days" and data.inventory_days <= 30: 
             is_optimal = True
@@ -155,7 +154,6 @@ def predict(data: BusinessInput):
         elif slider == "total_assets" and breakdown["asset_vs_debt"]["current"] == 25: 
             is_optimal = True
 
-        # Add the status flag to the card
         card = {
             "key": slider, 
             "label": ui_labels[slider], 
@@ -167,7 +165,6 @@ def predict(data: BusinessInput):
         elif impact > 0.1: grouped_impacts["medium_impact"].append(card)
         else: grouped_impacts["low_impact"].append(card)
 
-    # --- GENERATE EXPLANATION & RETURN ---
     breakdown_labels = {
         "cash_position": "Cash Position",
         "profit_margin": "Profit Margin & Efficiency",
@@ -185,3 +182,14 @@ def predict(data: BusinessInput):
         "currency": data.currency,
         "explanation": explanation
     }
+
+# --- 5. ALIAS ROUTES FOR BACKEND COMPATIBILITY ---
+@app.post("/diagnose")
+def diagnose(data: BusinessInput):
+    """Handles backend requests for initial diagnosis"""
+    return predict(data)
+
+@app.post("/simulate")
+def simulate(data: BusinessInput):
+    """Handles backend requests for what-if simulations"""
+    return predict(data)
