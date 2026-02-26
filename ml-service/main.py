@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import joblib
@@ -7,6 +7,7 @@ import shap
 import os
 import sklearn.impute
 import groq
+from fastapi.responses import JSONResponse
 
 # --- 1. INITIAL SETUP & FIXES ---
 if not hasattr(sklearn.impute.SimpleImputer, '_fill_dtype'):
@@ -195,6 +196,18 @@ def run_prediction(data: BusinessInput, is_simulation: bool = False):
 @app.get("/")
 def health_check():
     return {"status": "online"}
+
+@app.options("/{full_path:path}")
+async def options_handler(request: Request, full_path: str):
+    return JSONResponse(
+        content={"status": "ok"},
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Allow-Credentials": "true",
+        },
+    )
 
 @app.post("/diagnose")
 def diagnose(data: BusinessInput):
