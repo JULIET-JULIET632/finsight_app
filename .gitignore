@@ -10,3 +10,9 @@ npm-debug.log
 .env.*
 !.env.example
 # (and so on...)
+# Python venv
+.venv/
+venv/
+ml-service/.venv/
+__pycache__/
+
