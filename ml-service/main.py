@@ -1,27 +1,43 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import joblib
 import pandas as pd
 import shap
 import os
 import sklearn.impute
+import groq
 
-# --- QUICK FIX FOR SKLEARN VERSION MISMATCH ---
+# --- 1. INITIAL SETUP & FIXES ---
 if not hasattr(sklearn.impute.SimpleImputer, '_fill_dtype'):
     sklearn.impute.SimpleImputer._fill_dtype = property(lambda self: getattr(self, '_fit_dtype', None))
-# ---------------------------------------------
 
 app = FastAPI()
 
-# --- 1. LOAD MODEL AND PREPROCESSOR ---
+@app.get("/")
+def health():
+    return {"status": "ok"}
+
+# Enable CORS so your frontend can talk to this backend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize Groq (Ensure GROQ_API_KEY is in your Render Environment Variables)
+client = groq.Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+# --- 2. LOAD MODEL ---
 MODEL_PATH = os.path.join("model", "finsight.joblib")
 pipeline = joblib.load(MODEL_PATH)
 xgb_model = pipeline.named_steps["classifier"]
 preprocessor = pipeline.named_steps["preprocessor"]
-
 explainer = shap.TreeExplainer(xgb_model)
 
-# --- 2. INPUT MODEL ---
+# --- 3. DATA MODELS ---
 class BusinessInput(BaseModel):
     inventory_days: float
     monthly_cash_surplus: float
@@ -32,164 +48,162 @@ class BusinessInput(BaseModel):
     sector: str
     currency: str
 
-# --- 3. BREAKDOWN CALCULATION ---
+
+class SimulationInput(BaseModel):
+    original_data: BusinessInput
+    adjustments: dict[str, float]
+
+# --- 4. CORE LOGIC FUNCTIONS ---
+
 def calculate_score_breakdown(data: BusinessInput):
     # Asset vs Debt (Max 25)
     debt_ratio = data.total_debt / max(data.total_assets, 1)
-    if debt_ratio < 0.4: asset_score = 25
-    elif debt_ratio < 0.8: asset_score = 15
-    elif debt_ratio <= 1.0: asset_score = 5
-    else: asset_score = 0
+    asset_score = 25 if debt_ratio < 0.4 else 15 if debt_ratio < 0.8 else 5 if debt_ratio <= 1.0 else 0
 
     # Debt Coverage (Max 20)
     dscr = data.monthly_cash_surplus / max(data.monthly_loan_payment, 1)
-    if dscr >= 1.5: debt_score = 20
-    elif dscr >= 1.2: debt_score = 15
-    elif dscr >= 1.0: debt_score = 10
-    else: debt_score = 0
+    debt_score = 20 if dscr >= 1.5 else 15 if dscr >= 1.2 else 10 if dscr >= 1.0 else 0
 
     # Cash Position (Max 25)
     payroll_coverage = data.monthly_cash_surplus / max(data.monthly_wages, 1)
-    if payroll_coverage >= 1.0: cash_score = 25
-    elif payroll_coverage >= 0.5: cash_score = 15
-    else: cash_score = 5
+    cash_score = 25 if payroll_coverage >= 1.0 else 15 if payroll_coverage >= 0.5 else 5
 
     # Profit / Efficiency (Max 30)
-    if data.inventory_days <= 30: profit_score = 30
-    elif data.inventory_days <= 60: profit_score = 20
-    elif data.inventory_days <= 90: profit_score = 10
-    else: profit_score = 0
+    profit_score = 30 if data.inventory_days <= 30 else 20 if data.inventory_days <= 60 else 10 if data.inventory_days <= 90 else 0
 
     breakdown = {
-        "cash_position": {"current": cash_score, "max": 25},
-        "profit_margin": {"current": profit_score, "max": 30},
-        "asset_vs_debt": {"current": asset_score, "max": 25},
-        "debt_coverage": {"current": debt_score, "max": 20}
+        "cash_position": {"current": cash_score, "max": 25, "label": "Cash Position"},
+        "profit_margin": {"current": profit_score, "max": 30, "label": "Profit & Efficiency"},
+        "asset_vs_debt": {"current": asset_score, "max": 25, "label": "Asset to Debt"},
+        "debt_coverage": {"current": debt_score, "max": 20, "label": "Debt Coverage"}
     }
+    return breakdown, sum([cash_score, profit_score, asset_score, debt_score])
 
-    hand_score = sum([cash_score, profit_score, asset_score, debt_score])
-    return breakdown, hand_score
 
-# --- 4. PREDICT ENDPOINT ---
-@app.post("/predict")
-def predict(data: BusinessInput):
-    # --- ML FEATURES ---
-    annual_net_income = data.monthly_cash_surplus * 12
-    annual_wages = data.monthly_wages * 12
-    annual_loan = data.monthly_loan_payment * 12
-    safe_assets = max(data.total_assets, 1)
-    total_equity = max(safe_assets - data.total_debt, 1)
-    current_liabilities = max(data.total_debt * 0.3, 1)
-    cash_and_equiv = max(data.monthly_cash_surplus * 3, 0)
-    current_assets = cash_and_equiv + safe_assets * 0.5
+def get_llm_explanation(health_score, breakdown, is_simulation=False):
+    # Creating a simple summary for the LLM to read
+    summary = ", ".join([f"{v['label']}: {v['current']}/{v['max']}" for v in breakdown.values()])
+    
+    if is_simulation:
+        # PROMPT FOR THE SIMULATION SCREEN (Potential Benefits)
+        prompt = f"""
+        You are a business advisor in Nigeria. The user just simulated a new financial strategy.
+        New Score: {health_score}/100. Details: {summary}.
+        
+        Highlight the potential benefits of this new simulated position. Briefly explain how these new numbers make the business stronger, safer, or more profitable.
+        
+        Strict Constraints: No jargon. No greetings. Under 60 words.
+        """
+    else:
+        # PROMPT FOR THE DIAGNOSIS SCREEN (Explanation of current state)
+        prompt = f"""
+        You are a supportive business advisor for a company in Nigeria. 
+        Analyze this current report: Score {health_score}/100. Details: {summary}.
+        
+        1. Praise the user for areas where they scored high.
+        2. Explain the areas pulling the score down using simple terms (e.g., 'money tied up in stock' instead of 'inventory turnover').
+        
+        Strict Constraints: No jargon. No advice. Under 60 words. No greetings.
+        """
+        
+    try:
+        response = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+        )
+        return response.choices[0].message.content.strip()
+    except:
+        return "Analysis currently unavailable, but your metrics are being tracked."
+    
+# --- 5. ENDPOINTS ---
 
+def run_prediction(data: BusinessInput, is_simulation: bool = False):
+    # --- 1. ML FEATURE ENGINEERING ---
     ml_features = {
-        "Return_on_Sales": annual_net_income / max(annual_net_income + annual_wages + annual_loan, 1),
-        "Activity_Total_Asset_Turnover": (annual_net_income + annual_wages) / safe_assets,
-        "Asset_Turnover_Days": 365 / max(((annual_net_income + annual_wages)/safe_assets), 0.001),
+        "Return_on_Sales": (data.monthly_cash_surplus * 12) / max((data.monthly_cash_surplus + data.monthly_wages + data.monthly_loan_payment) * 12, 1),
+        "Activity_Total_Asset_Turnover": ((data.monthly_cash_surplus + data.monthly_wages) * 12) / max(data.total_assets, 1),
+        "Asset_Turnover_Days": 365 / max((((data.monthly_cash_surplus + data.monthly_wages)*12)/max(data.total_assets,1)), 0.001),
         "Days_Total_Receivables_Outstanding": 15.0,
         "Inventory_Turnover_Days": data.inventory_days,
-        "Liquidity_Cash_Ratio": cash_and_equiv / current_liabilities,
-        "Quick_Ratio": (cash_and_equiv + (current_assets * 0.1)) / current_liabilities,
-        "Current_Ratio": current_assets / current_liabilities,
-        "Return_on_Assets": annual_net_income / safe_assets,
-        "Return_on_Equity": annual_net_income / total_equity
+        "Liquidity_Cash_Ratio": (data.monthly_cash_surplus * 3) / max(data.total_debt * 0.3, 1),
+        "Quick_Ratio": (data.monthly_cash_surplus * 3 + data.total_assets * 0.05) / max(data.total_debt * 0.3, 1),
+        "Current_Ratio": (data.monthly_cash_surplus * 3 + data.total_assets * 0.5) / max(data.total_debt * 0.3, 1),
+        "Return_on_Assets": (data.monthly_cash_surplus * 12) / max(data.total_assets, 1),
+        "Return_on_Equity": (data.monthly_cash_surplus * 12) / max(data.total_assets - data.total_debt, 1)
     }
 
-    input_df = pd.DataFrame([ml_features])
-    processed_data = preprocessor.transform(input_df)
-
-    # --- ML PREDICTION ---
+    processed_data = preprocessor.transform(pd.DataFrame([ml_features]))
     distress_prob = xgb_model.predict_proba(processed_data)[0][1]
-
-    # --- HAND-CODED BREAKDOWN ---
+    
     breakdown, hand_score = calculate_score_breakdown(data)
-
-    # --- COMBINED HEALTH SCORE ---
-    ml_weight = 0.4
-    combined_score = int(hand_score * 0.6 + (1 - distress_prob) * 100 * ml_weight)
+    combined_score = int(hand_score * 0.6 + (1 - distress_prob) * 100 * 0.4)
     health_score = max(0, min(100, combined_score))
 
-    # --- SHAP FOR SLIDER IMPACTS ---
-    explainer_values = explainer.shap_values(processed_data)[0]
-    slider_impacts = {k:0.0 for k in ["inventory_days","monthly_cash_surplus","monthly_wages","monthly_loan_payment","total_assets","total_debt"]}
-    feature_to_slider = {
-        "Return_on_Sales":["monthly_cash_surplus","monthly_wages"],
-        "Activity_Total_Asset_Turnover":["total_assets","monthly_wages"],
-        "Asset_Turnover_Days":["total_assets"],
-        "Inventory_Turnover_Days":["inventory_days"],
-        "Liquidity_Cash_Ratio":["monthly_cash_surplus","total_assets"],
-        "Quick_Ratio":["monthly_cash_surplus","monthly_loan_payment"],
-        "Current_Ratio":["total_assets","total_debt"],
-        "Return_on_Assets":["monthly_cash_surplus","total_assets"],
-        "Return_on_Equity":["monthly_cash_surplus","total_debt"]
-    }
-    for f, val in zip(ml_features.keys(), explainer_values):
-        for slider in feature_to_slider.get(f, []):
-            slider_impacts[slider] += abs(val)
-    total = sum(slider_impacts.values()) or 1
-    for k in slider_impacts: slider_impacts[k] /= total
+    explanation = get_llm_explanation(health_score, breakdown, is_simulation)
 
-    # --- GROUP SLIDERS BY IMPACT & HEALTH STATUS ---
-    grouped_impacts = {"high_impact":[],"medium_impact":[],"low_impact":[]}
-    ui_labels = {
-        "inventory_days":"Stock Spending / Inventory",
-        "monthly_cash_surplus":"Cash Buffer / Surplus",
-        "monthly_wages":"Payroll / Wages",
-        "monthly_loan_payment":"Loan Repayments",
-        "total_assets":"Total Assets",
-        "total_debt":"Total Debt"
-    }
-    
-    for slider, impact in slider_impacts.items():
-        is_optimal = False
-        if slider == "inventory_days" and data.inventory_days <= 30: 
-            is_optimal = True
-        elif slider == "total_debt" and breakdown["asset_vs_debt"]["current"] == 25: 
-            is_optimal = True
-        elif slider in ["monthly_cash_surplus", "monthly_wages"] and breakdown["cash_position"]["current"] == 25: 
-            is_optimal = True
-        elif slider == "monthly_loan_payment" and breakdown["debt_coverage"]["current"] == 20: 
-            is_optimal = True
-        elif slider == "total_assets" and breakdown["asset_vs_debt"]["current"] == 25: 
-            is_optimal = True
-
-        card = {
-            "key": slider, 
-            "label": ui_labels[slider], 
-            "current_value": getattr(data, slider),
-            "status": "optimal" if is_optimal else "needs_improvement"
+    # --- 2. CONDITIONAL RETURN LOGIC ---
+    if is_simulation:
+        # Streamlined response for Simulation & ready for /coach
+        return {
+            "status": "success",
+            "final_score": health_score,
+            "potential_benefits": explanation,
+            "currency": data.currency,
+            "sector": data.sector,
+            "adjusted_data": {
+                "inventory_days": data.inventory_days,
+                "total_debt": data.total_debt,
+                "monthly_cash_surplus": data.monthly_cash_surplus
+            }
+        }
+    else:
+        # Full response for the first Diagnosis
+        explainer_values = explainer.shap_values(processed_data)[0]
+        feature_names = ["Return_on_Sales", "Activity_Total_Asset_Turnover", "Asset_Turnover_Days", 
+                         "Days_Total_Receivables_Outstanding", "Inventory_Turnover_Days", 
+                         "Liquidity_Cash_Ratio", "Quick_Ratio", "Current_Ratio", 
+                         "Return_on_Assets", "Return_on_Equity"]
+        
+        shap_dict = {name: abs(val) for name, val in zip(feature_names, explainer_values)}
+        
+        # Map the ML features to the EXACT 6 inputs the user provided
+        slider_impacts = {
+            "inventory_days": shap_dict.get("Inventory_Turnover_Days", 0),
+            "monthly_cash_surplus": shap_dict.get("Return_on_Sales", 0) + shap_dict.get("Liquidity_Cash_Ratio", 0),
+            "monthly_wages": shap_dict.get("Return_on_Sales", 0), # Wages affect profitability
+            "monthly_loan_payment": shap_dict.get("Liquidity_Cash_Ratio", 0), # Payments affect debt coverage
+            "total_assets": shap_dict.get("Activity_Total_Asset_Turnover", 0) + shap_dict.get("Return_on_Assets", 0),
+            "total_debt": shap_dict.get("Return_on_Equity", 0) + shap_dict.get("Quick_Ratio", 0)
         }
         
-        if impact > 0.3: grouped_impacts["high_impact"].append(card)
-        elif impact > 0.1: grouped_impacts["medium_impact"].append(card)
-        else: grouped_impacts["low_impact"].append(card)
+        sorted_sliders = sorted(slider_impacts.items(), key=lambda x: x[1], reverse=True)
+        
+        impacts = {
+            "high_impact": [sorted_sliders[0][0]] if len(sorted_sliders) > 0 else [],
+            "medium_impact": [sorted_sliders[1][0]] if len(sorted_sliders) > 1 else [],
+            "low_impact": [x[0] for x in sorted_sliders[2:]]
+        }
 
-    breakdown_labels = {
-        "cash_position": "Cash Position",
-        "profit_margin": "Profit Margin & Efficiency",
-        "asset_vs_debt": "Asset to Debt Ratio",
-        "debt_coverage": "Debt Coverage"
-    }
-    weak_points = [k for k,v in breakdown.items() if v["current"] < v["max"]]
-    explanation = "Focus on improving: " + ", ".join([breakdown_labels.get(k,k) for k in weak_points]) if weak_points else "All metrics are at maximum!"
+        return {
+            "status": "success",
+            "health_score": health_score,
+            "breakdown": breakdown,
+            "impacts": impacts,
+            "currency": data.currency,
+            "explanation": explanation
+        }
 
-    return {
-        "status": "success",
-        "health_score": health_score,
-        "breakdown": breakdown,
-        "simulation_impacts": grouped_impacts,
-        "currency": data.currency,
-        "explanation": explanation
-    }
-
-# --- 5. ALIAS ROUTES FOR BACKEND COMPATIBILITY ---
 @app.post("/diagnose")
 def diagnose(data: BusinessInput):
-    """Handles backend requests for initial diagnosis"""
-    return predict(data)
+    return run_prediction(data, is_simulation=False)
 
 @app.post("/simulate")
-def simulate(data: BusinessInput):
-    """Handles backend requests for what-if simulations"""
-    return predict(data)
+def simulate(payload: SimulationInput):
+    data_dict = payload.original_data.model_dump() 
+    adjustments = payload.adjustments
+    
+    for key, percent in adjustments.items():
+        if key in data_dict:
+            data_dict[key] = max(0, data_dict[key] * (1 + (percent / 100)))
+            
+    return run_prediction(BusinessInput(**data_dict), is_simulation=True)
