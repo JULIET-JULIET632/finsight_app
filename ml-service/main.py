@@ -14,18 +14,22 @@ if not hasattr(sklearn.impute.SimpleImputer, '_fill_dtype'):
 
 app = FastAPI()
 
-@app.get("/")
-def health():
-    return {"status": "ok"}
+# --- 2. CORS CONFIGURATION ---
+# Industry-standard origins for development and production
+origins = [
+    "http://localhost:3000",        # Local React
+    "http://localhost:5173",        # Vite (common alternative)
+    "https://finsight.com",          # Production domain
+    "https://finsight-app.vercel.app" # Common deployment URL
+]
 
-# Enable CORS so your frontend can talk to this backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-)
+)          # Allows Content-Type, Authorization, etc.
 
 # Initialize Groq (Ensure GROQ_API_KEY is in your Render Environment Variables)
 client = groq.Groq(api_key=os.environ.get("GROQ_API_KEY"))
@@ -192,6 +196,10 @@ def run_prediction(data: BusinessInput, is_simulation: bool = False):
             "currency": data.currency,
             "explanation": explanation
         }
+    
+@app.get("/")
+def health_check():
+    return {"status": "online"}
 
 @app.post("/diagnose")
 def diagnose(data: BusinessInput):
