@@ -14,23 +14,18 @@ if not hasattr(sklearn.impute.SimpleImputer, '_fill_dtype'):
 
 app = FastAPI()
 
-# --- 2. CORS CONFIGURATION ---
-# Industry-standard origins for development and production
-origins = [
-    "http://localhost:3000",        # Local React
-    "http://localhost:5173",        # Vite (common alternative)
-    "https://finsight.com",          # Production domain
-    "https://finsight-app.vercel.app" # Common deployment URL
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://finsight-app.vercel.app",
+        "https://finsight.com"
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"], # Explicitly allowing OPTIONS for preflight
     allow_headers=["*"],
-)          # Allows Content-Type, Authorization, etc.
-
+)
 # Initialize Groq (Ensure GROQ_API_KEY is in your Render Environment Variables)
 client = groq.Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
