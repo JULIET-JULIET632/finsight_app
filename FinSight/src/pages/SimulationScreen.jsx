@@ -3,9 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { sanitizeInput } from '../utils/sanitize';
 import { getCookie, generateCSRFToken } from '../utils/cookies';
 import { getAuthToken, verifyToken } from '../utils/token';
+import { useAppContext } from '../context/AppContext';
+import { useSimulation } from '../hooks/useSimulation';
 
 const SimulationScreen = () => {
   const navigate = useNavigate();
+  const { diagnosisData, setSimulationData } = useAppContext();
+  const { loading: simulationLoading, error: simulationError, runSimulation } = useSimulation();
+  
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -13,6 +18,7 @@ const SimulationScreen = () => {
   const [currencySymbol, setCurrencySymbol] = useState('$');
   const [formData, setFormData] = useState({});
   const [selectedItems, setSelectedItems] = useState([]);
+  const [healthScore, setHealthScore] = useState(58);
   
   // Slider states - from -100 to 100 with 0 at center
   const [sliders, setSliders] = useState({
@@ -44,6 +50,7 @@ const SimulationScreen = () => {
         const storedCurrency = sessionStorage.getItem('currency') || 'USD';
         const storedSymbol = sessionStorage.getItem('currencySymbol') || '$';
         const storedSelected = sessionStorage.getItem('selectedItems');
+        const storedDiagnosis = sessionStorage.getItem('diagnosisResult');
         
         if (storedData) {
           const parsedData = JSON.parse(storedData);
@@ -59,6 +66,16 @@ const SimulationScreen = () => {
           setSelectedItems(JSON.parse(storedSelected));
         }
         
+        // Get health score from diagnosis data
+        if (diagnosisData && diagnosisData.health_score) {
+          setHealthScore(diagnosisData.health_score);
+        } else if (storedDiagnosis) {
+          const parsed = JSON.parse(storedDiagnosis);
+          if (parsed.health_score) {
+            setHealthScore(parsed.health_score);
+          }
+        }
+        
         setCurrency(storedCurrency);
         setCurrencySymbol(storedSymbol);
 
@@ -72,13 +89,11 @@ const SimulationScreen = () => {
     };
 
     validateSession();
-  }, [navigate]);
+  }, [navigate, diagnosisData]);
 
   // Calculate base score from form data
   const calculateBaseScore = () => {
-    // This would be a more complex calculation in production
-    // For now, using 58 as base as shown in screenshot
-    return 58;
+    return healthScore;
   };
 
   // FORCING +3 POINTS as shown in screenshot
@@ -114,19 +129,60 @@ const SimulationScreen = () => {
     setSliders(prev => ({ ...prev, [name]: parseInt(value) }));
   };
 
-  const handleSeeImpact = () => {
+  const handleSeeImpact = async () => {
     // SECURITY MEASURE 6: CSRF token regeneration on navigation
     generateCSRFToken();
     
-    // Store simulation results in session storage
-    sessionStorage.setItem('simulationResults', JSON.stringify({
-      baseScore,
-      newScore,
-      scoreImpact,
-      sliders
-    }));
-    
-    navigate('/updated-score');
+    try {
+      // Prepare adjustments based on selected items - USE CORRECT BACKEND FIELD NAMES
+const adjustments = {};
+
+// Map slider values to backend field names (from your API docs)
+selectedItems.forEach(id => {
+  if (id === 1) { // Days to Sell Stock
+    adjustments['inventory_days'] = sliders.monthlyExpenses;
+  }
+  if (id === 2) { // Monthly Profit
+    adjustments['monthly_cash_surplus'] = sliders.monthlySales;
+  }
+  if (id === 3) { // Monthly Staff Salaries
+    adjustments['monthly_wages'] = sliders.monthlyExpenses;
+  }
+  if (id === 4) { // Monthly Loan Payments
+    adjustments['monthly_loan_payment'] = sliders.monthlyExpenses;
+  }
+  if (id === 5) { // Total Assets
+    adjustments['total_assets'] = sliders.cashAvailable;
+  }
+  if (id === 6) { // Total Debt
+    adjustments['total_debt'] = sliders.monthlyExpenses;
+  }
+});
+      
+      // Call the simulation API
+      const result = await runSimulation(formData, adjustments);
+      
+      // Store simulation results
+      setSimulationData(result);
+      sessionStorage.setItem('simulationResults', JSON.stringify({
+        baseScore: healthScore,
+        newScore: result.final_score || newScore,
+        scoreImpact: (result.final_score || newScore) - healthScore,
+        sliders
+      }));
+      
+      navigate('/updated-score');
+    } catch (err) {
+      // Fallback to old behavior if API fails
+      console.log('API failed, using fallback', err);
+      sessionStorage.setItem('simulationResults', JSON.stringify({
+        baseScore,
+        newScore,
+        scoreImpact,
+        sliders
+      }));
+      navigate('/updated-score');
+    }
   };
 
   // SECURITY MEASURE 7: Loading state to prevent interaction during validation
@@ -141,12 +197,12 @@ const SimulationScreen = () => {
   }
 
   // SECURITY MEASURE 8: Error state with user-friendly message
-  if (error) {
+  if (error || simulationError) {
     return (
       <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4">
         <div className="w-[395px] bg-white rounded-[30px] shadow-xl overflow-hidden relative flex items-center justify-center">
           <div className="text-center p-6">
-            <p className="text-red-500 mb-4">{error}</p>
+            <p className="text-red-500 mb-4">{error || simulationError}</p>
             <button
               onClick={() => navigate('/welcome')}
               className="px-4 py-2 bg-[#2C6C71] text-white rounded-[10px]"
@@ -298,14 +354,14 @@ const SimulationScreen = () => {
           {/* See Impact Button */}
           <button
             onClick={handleSeeImpact}
-            disabled={!isAuthenticated}
+            disabled={!isAuthenticated || simulationLoading}
             className="w-full font-semibold py-4 px-6 rounded-[10px] shadow-md transition-all duration-200 transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ 
               backgroundColor: '#2C6C71',
               color: 'white'
             }}
           >
-            See Impact
+            {simulationLoading ? 'Calculating...' : 'See Impact'}
           </button>
         </div>
       </div>

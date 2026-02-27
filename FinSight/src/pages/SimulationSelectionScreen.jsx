@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { sanitizeInput } from '../utils/sanitize';
 import { getCookie, generateCSRFToken } from '../utils/cookies';
 import { getAuthToken, verifyToken } from '../utils/token';
+import { useAppContext } from '../context/AppContext';
 
 const SimulationSelectionScreen = () => {
   const navigate = useNavigate();
+  const { diagnosisData } = useAppContext();
   const [selected, setSelected] = useState([]);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -14,6 +16,7 @@ const SimulationSelectionScreen = () => {
   const [currencySymbol, setCurrencySymbol] = useState('$');
   const [formData, setFormData] = useState({});
   const [businessSector, setBusinessSector] = useState('');
+  const [healthScore, setHealthScore] = useState(58);
 
   // SECURITY MEASURE 1: Authentication check on mount
   useEffect(() => {
@@ -53,6 +56,20 @@ const SimulationSelectionScreen = () => {
         setCurrencySymbol(storedSymbol);
         setBusinessSector(sanitizeInput(storedSector));
 
+        // Get health score from diagnosis data (API result)
+        if (diagnosisData && diagnosisData.health_score) {
+          setHealthScore(diagnosisData.health_score);
+        } else {
+          // Try to get from session storage as fallback
+          const storedDiagnosis = sessionStorage.getItem('diagnosisResult');
+          if (storedDiagnosis) {
+            const parsedDiagnosis = JSON.parse(storedDiagnosis);
+            if (parsedDiagnosis.health_score) {
+              setHealthScore(parsedDiagnosis.health_score);
+            }
+          }
+        }
+
         setIsAuthenticated(true);
       } catch (err) {
         // SECURITY MEASURE 4: User-friendly error messages (no technical details)
@@ -63,7 +80,7 @@ const SimulationSelectionScreen = () => {
     };
 
     validateSession();
-  }, [navigate]);
+  }, [navigate, diagnosisData]);
 
   // ALL 6 inputs from BusinessInfoScreen with impact levels
   const impactItems = [
@@ -134,9 +151,6 @@ const SimulationSelectionScreen = () => {
       badgeColor: '#12AE00', // Green for low impact
     }
   ];
-
-  // Current score: 58
-  const currentScore = 58;
 
   // SECURITY MEASURE 5: CSRF token regeneration on user actions
   const toggleSelect = (id) => {
@@ -226,7 +240,7 @@ const SimulationSelectionScreen = () => {
             {/* Score and Warning on the same line with MORE SPACE */}
             <div className="flex items-center justify-center gap-8 mb-0">
               <div className="flex items-center gap-1">
-                <span className="text-4xl font-bold" style={{ color: '#EFB700' }}>58</span>
+                <span className="text-4xl font-bold" style={{ color: '#EFB700' }}>{healthScore}</span>
                 <span className="text-2xl text-gray-400">/100</span>
               </div>
               

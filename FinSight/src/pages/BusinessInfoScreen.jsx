@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAppContext } from '../context/AppContext';
+import { useDiagnosis } from '../hooks/useDiagnosis';
 import { sanitizeInput, sanitizeNumeric } from '../utils/sanitize';
 import { getCookie, generateCSRFToken } from '../utils/cookies';
 import { generateToken, verifyToken } from '../utils/token';
 import { getAuthToken } from '../utils/token';
+import config from '../config/env';
 
 // ALL 54 African countries with their currencies
 const africanCurrencies = [
@@ -94,6 +97,9 @@ const fieldHelpers = {
 
 const BusinessInfoScreen = () => {
   const navigate = useNavigate();
+  const { setCurrency, setBusinessSector, setDiagnosisData } = useAppContext();
+  const { loading: apiLoading, error: apiError, runDiagnosis } = useDiagnosis();
+
   const [formData, setFormData] = useState({
     country: 'Nigeria',
     businessSector: '',
@@ -323,37 +329,70 @@ const BusinessInfoScreen = () => {
     try {
       const countryData = africanCurrencies.find(c => c.country === formData.country);
       
+      // Store in context and session storage
+      setCurrency(countryData?.code || 'NGN', countryData?.symbol || '₦');
+      setBusinessSector(formData.businessSector);
+      
       sessionStorage.setItem('country', formData.country);
       sessionStorage.setItem('currency', countryData?.code || 'NGN');
       sessionStorage.setItem('currencySymbol', countryData?.symbol || '₦');
       sessionStorage.setItem('businessSector', formData.businessSector);
       sessionStorage.setItem('formData', JSON.stringify(formData));
       
+      // SECURITY: Generate CSRF token
       const csrfToken = generateCSRFToken();
-      const authToken = generateToken('user-123');
+      const authToken = generateToken('user-' + Date.now());
       sessionStorage.setItem('auth_token', authToken);
-      
-      const response = await fetch('https://api.finsight.com/risk-assessment', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken,
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify(formData)
-      }).catch(() => {
-        console.log('Development mode - simulated API call');
-        return { ok: true };
-      });
-      
-      if (response.ok) {
+
+      if (config.features.devMode) {
+        // Development mode - simulate API call
+        console.log('Development mode - simulated API call', formData);
+        
+        // Simulate API response
+        const mockResult = {
+          status: 'success',
+          health_score: 48,
+          breakdown: {
+            cash_position: { current: 15, max: 25, label: 'Cash Position' },
+            profit_margin: { current: 10, max: 30, label: 'Profit & Efficiency' },
+            asset_vs_debt: { current: 15, max: 25, label: 'Asset to Debt' },
+            debt_coverage: { current: 10, max: 20, label: 'Debt Coverage' }
+          },
+          impacts: {
+            high_impact: ['total_debt'],
+            medium_impact: ['inventory_days', 'monthly_loan_payment'],
+            low_impact: ['monthly_cash_surplus', 'total_assets', 'monthly_wages']
+          },
+          currency: countryData?.code || 'NGN',
+          explanation: 'Your business shows signs of financial stress in key areas.'
+        };
+        
+        setDiagnosisData(mockResult);
         navigate('/results');
       } else {
-        alert('Unable to process your request. Please try again later.');
+        // Production mode - call actual API
+        // Format the data to match what the backend expects
+        const formattedData = {
+          daysToSell: formData.daysToSell,
+          monthlyProfit: formData.monthlyProfit,
+          staffSalaries: formData.staffSalaries,
+          loanPayments: formData.loanPayments,
+          totalAssets: formData.totalAssets,
+          totalDebt: formData.totalDebt,
+          businessSector: formData.businessSector,
+          currency: selectedCurrency.code,  // ← THIS WAS MISSING!
+        };
+
+        console.log('📤 SENDING FORMATTED DATA:', formattedData);
+        const result = await runDiagnosis(formattedData);
+        setDiagnosisData(result);
+        navigate('/results');
       }
       
     } catch (error) {
-      alert('Unable to process your request. Please check your connection and try again.');
+      // Error is handled by hook or show user-friendly message
+      console.error('Submission error:', error);
+      setError('Unable to process your request. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -807,16 +846,21 @@ const BusinessInfoScreen = () => {
             <div className="pt-4">
               <button
                 type="submit"
-                disabled={isSubmitting || !isAuthenticated}
+                disabled={isSubmitting || apiLoading || !isAuthenticated}
                 className="w-full font-semibold py-4 px-6 rounded-[10px] shadow-md transition-all duration-200 transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ 
                   backgroundColor: getButtonColor(),
                   color: 'white'
                 }}
               >
-                {isSubmitting ? 'Processing...' : 'Check Health'}
+                {isSubmitting || apiLoading ? 'Processing...' : 'Check Health'}
               </button>
             </div>
+
+            {/* API Error Message */}
+            {apiError && (
+              <p className="text-xs text-red-500 text-center mt-2">{apiError}</p>
+            )}
 
             {Object.keys(errors).length > 0 && Object.values(errors).some(e => e) && (
               <p className="text-xs text-red-500 text-center mt-2">

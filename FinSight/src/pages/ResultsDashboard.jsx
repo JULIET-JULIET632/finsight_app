@@ -1,25 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { sanitizeInput } from '../utils/sanitize';
-import { getCookie, generateCSRFToken } from '../utils/cookies';
+import { useAppContext } from '../context/AppContext';
 import { getAuthToken, verifyToken } from '../utils/token';
+import { getCookie, generateCSRFToken } from '../utils/cookies';
+import { formatBreakdown } from '../services/api';
 
 const ResultsDashboard = () => {
   const navigate = useNavigate();
+  const { diagnosisData, currency, currencySymbol } = useAppContext();
   const [isButtonClicked, setIsButtonClicked] = useState(false);
   const [isButtonHovered, setIsButtonHovered] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [score, setScore] = useState(65);
-  const [currency, setCurrency] = useState('KES');
-  const [businessSector, setBusinessSector] = useState('');
+  
+  // Use data from context or fallback to session storage
+  const [healthScore, setHealthScore] = useState(48);
+  const [breakdown, setBreakdown] = useState([]);
+  const [explanation, setExplanation] = useState('');
 
-  // Check authentication and tokens on component mount
+  // SECURITY MEASURE: Authentication check on mount
   useEffect(() => {
     const validateSession = async () => {
       try {
-        // Check for auth token
         const token = getAuthToken();
         if (!token || !verifyToken(token)) {
           setError('Your session has expired. Please start over.');
@@ -27,45 +30,28 @@ const ResultsDashboard = () => {
           return;
         }
 
-        // Verify CSRF token
         const csrfToken = getCookie('XSRF-TOKEN');
         if (!csrfToken) {
-          // Generate new CSRF token if not present
           generateCSRFToken();
         }
 
-        // Get currency and business sector from session storage
-        const storedCurrency = sessionStorage.getItem('currency');
-        const storedSector = sessionStorage.getItem('businessSector');
-        
-        if (storedCurrency) {
-          setCurrency(sanitizeInput(storedCurrency));
+        // Load diagnosis data from context or session storage
+        if (diagnosisData) {
+          setHealthScore(diagnosisData.health_score);
+          setBreakdown(formatBreakdown(diagnosisData.breakdown));
+          setExplanation(diagnosisData.explanation);
+        } else {
+          const storedData = sessionStorage.getItem('diagnosisResult');
+          if (storedData) {
+            const parsedData = JSON.parse(storedData);
+            setHealthScore(parsedData.health_score);
+            setBreakdown(formatBreakdown(parsedData.breakdown));
+            setExplanation(parsedData.explanation);
+          }
         }
-        
-        if (storedSector) {
-          setBusinessSector(sanitizeInput(storedSector));
-        }
-
-        // In a real app, you would fetch the actual score from an API with HTTPS
-        // const response = await fetch('https://api.finsight.com/get-score', {
-        //   method: 'GET',
-        //   headers: {
-        //     'Authorization': `Bearer ${token}`,
-        //     'X-CSRF-Token': csrfToken,
-        //     'Content-Type': 'application/json'
-        //   }
-        // });
-        
-        // if (response.ok) {
-        //   const data = await response.json();
-        //   setScore(sanitizeInput(data.score));
-        // } else {
-        //   setError('Unable to fetch your score. Please try again.');
-        // }
 
         setIsAuthenticated(true);
       } catch (err) {
-        // User-friendly error message - no technical details exposed
         setError('Authentication failed. Please try again.');
       } finally {
         setIsLoading(false);
@@ -73,15 +59,7 @@ const ResultsDashboard = () => {
     };
 
     validateSession();
-  }, [navigate]);
-
-  // Score breakdown data with percentages
-  const scoreBreakdown = [
-    { label: 'Cash position', score: 15, max: 25, percentage: 60 },
-    { label: 'Profit Margin', score: 5, max: 30, percentage: 17 },
-    { label: 'Asset vs Debt', score: 22, max: 25, percentage: 88 },
-    { label: 'Debt Coverage', score: 20, max: 20, percentage: 100 }
-  ];
+  }, [navigate, diagnosisData]);
 
   // Function to determine color based on percentage
   const getScoreColor = (percentage) => {
@@ -89,6 +67,14 @@ const ResultsDashboard = () => {
     if (percentage >= 60) return 'text-yellow-600';
     if (percentage >= 40) return 'text-orange-600';
     return 'text-red-600';
+  };
+
+  // Get background color for score pills
+  const getPillColor = (percentage) => {
+    if (percentage >= 80) return 'bg-green-100 text-green-700';
+    if (percentage >= 60) return 'bg-yellow-100 text-yellow-700';
+    if (percentage >= 40) return 'bg-orange-100 text-orange-700';
+    return 'bg-red-100 text-red-700';
   };
 
   // Get bar color based on percentage
@@ -101,33 +87,25 @@ const ResultsDashboard = () => {
 
   // Get circle color based on score
   const getCircleBaseColor = () => {
-    if (score >= 80) return '#10B981'; // green
-    if (score >= 60) return '#F59E0B'; // yellow/orange
-    if (score >= 40) return '#F97316'; // orange
+    if (healthScore >= 80) return '#10B981'; // green
+    if (healthScore >= 60) return '#F59E0B'; // yellow/orange
+    if (healthScore >= 40) return '#F97316'; // orange
     return '#EF4444'; // red
   };
 
   // Get pill color for Needs Improvement
   const getNeedsImprovementColor = () => {
-    if (score >= 80) return '#10B981'; // green
-    if (score >= 60) return '#F59E0B'; // yellow/orange
-    if (score >= 40) return '#F97316'; // orange
+    if (healthScore >= 80) return '#10B981'; // green
+    if (healthScore >= 60) return '#F59E0B'; // yellow/orange
+    if (healthScore >= 40) return '#F97316'; // orange
     return '#EF4444'; // red
-  };
-
-  // Get background color for score pills
-  const getPillColor = (percentage) => {
-    if (percentage >= 80) return 'bg-green-100 text-green-700';
-    if (percentage >= 60) return 'bg-yellow-100 text-yellow-700';
-    if (percentage >= 40) return 'bg-orange-100 text-orange-700';
-    return 'bg-red-100 text-red-700';
   };
 
   // Calculate conic gradient for circle fill based on score percentage
   const getCircleGradient = () => {
-    const percentage = score; // score is out of 100
+    const percentage = healthScore;
     const baseColor = getCircleBaseColor();
-    const emptyColor = '#E5E7EB'; // light gray
+    const emptyColor = '#E5E7EB';
     
     if (percentage >= 100) {
       return baseColor;
@@ -136,9 +114,7 @@ const ResultsDashboard = () => {
   };
 
   const handleClick = () => {
-    // Generate new CSRF token for the next action
     generateCSRFToken();
-    
     setIsButtonClicked(true);
     setTimeout(() => setIsButtonClicked(false), 200);
     navigate('/simulation-selection');
@@ -155,13 +131,13 @@ const ResultsDashboard = () => {
     return (
       <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4" style={{ fontFamily: 'Poppins' }}>
         <div className="w-[395px] bg-white rounded-[30px] shadow-xl overflow-hidden relative flex items-center justify-center">
-          <p className="text-center text-gray-500">Loading...</p>
+          <p className="text-center text-gray-500">Loading your results...</p>
         </div>
       </div>
     );
   }
 
-  // Show error state with user-friendly message
+  // Show error state
   if (error) {
     return (
       <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4" style={{ fontFamily: 'Poppins' }}>
@@ -170,7 +146,7 @@ const ResultsDashboard = () => {
             <p className="text-red-500 mb-4">{error}</p>
             <button
               onClick={() => navigate('/welcome')}
-              className="px-4 py-2 bg-[#2C6C71] text-white rounded-[10px] hover:bg-[#1A4A4A] transition-colors duration-200"
+              className="px-4 py-2 bg-[#2C6C71] text-white rounded-[10px]"
             >
               Go to Welcome
             </button>
@@ -186,33 +162,40 @@ const ResultsDashboard = () => {
         {/* Header with back arrow */}
         <div className="absolute top-6 left-0 right-0 flex items-center justify-center z-10">
           <button 
-            onClick={() => navigate('/business-info')}
+            onClick={() => {
+              generateCSRFToken();
+              navigate('/business-info');
+            }}
             className="absolute left-4 text-xl text-gray-500 hover:text-gray-700 transition-colors duration-200"
             style={{ fontSize: '24px', fontWeight: '300' }}
           >
             &lt;
           </button>
-          <h1 className="text-xl font-semibold" style={{ color: '#01272B', fontFamily: 'Poppins' }}>
+          <h1 className="text-xl font-semibold" style={{ color: '#01272B' }}>
             Your Business Risk Score
           </h1>
         </div>
 
         <div className="px-6 pt-24 pb-8">
-          {/* Score Circle with "Out of 100" INSIDE */}
-          <div className="flex justify-center items-center mb-4">
+          {/* Score Circle with OUTLINED circle */}
+          <div className="flex justify-center items-center mb-2">
             <div 
-              className="w-36 h-36 rounded-full flex flex-col items-center justify-center relative"
+              className="w-32 h-32 rounded-full flex items-center justify-center relative"
               style={{ 
-                background: score >= 100 ? getCircleBaseColor() : getCircleGradient(),
+                background: healthScore >= 100 ? getCircleBaseColor() : getCircleGradient(),
                 padding: '4px'
               }}
             >
               {/* Inner white circle for clean background */}
-              <div className="w-full h-full rounded-full bg-white flex flex-col items-center justify-center">
-                <span className="text-5xl font-bold text-[#2C6C71] leading-tight">{score}</span>
-                <span className="text-xs text-gray-400">Out of 100</span>
+              <div className="w-full h-full rounded-full bg-white flex items-center justify-center">
+                <span className="text-4xl font-bold text-[#2C6C71]">{healthScore}</span>
               </div>
             </div>
+          </div>
+          
+          {/* Out of 100 text */}
+          <div className="text-center mb-2">
+            <span className="text-base text-gray-400">Out of 100</span>
           </div>
           
           {/* Needs Improvement - ROUNDED RECTANGLE with colored stroke */}
@@ -233,12 +216,11 @@ const ResultsDashboard = () => {
           {/* Score Breakdown Section */}
           <h2 className="text-base font-semibold mb-4" style={{ color: '#998F8F' }}>Score Breakdown</h2>
           
-          {/* Score Breakdown Card - #FFF8F8 with visual bars */}
+          {/* Score Breakdown Card */}
           <div className="bg-[#FFF8F8] rounded-[20px] p-5 mb-8">
             <div className="space-y-5">
-              {scoreBreakdown.map((item, index) => {
+              {breakdown.map((item, index) => {
                 const barColor = getBarColor(item.percentage);
-                const percentage = item.percentage;
                 
                 return (
                   <div key={index} className="space-y-2">
@@ -259,7 +241,7 @@ const ResultsDashboard = () => {
                     <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
                       <div 
                         className={`h-full rounded-full ${barColor}`}
-                        style={{ width: `${percentage}%` }}
+                        style={{ width: `${item.percentage}%` }}
                       ></div>
                     </div>
                   </div>
@@ -268,27 +250,24 @@ const ResultsDashboard = () => {
             </div>
           </div>
 
-          {/* Currency and Business Sector Info (non-sensitive) */}
-          {currency && businessSector && (
+          {/* Currency Info */}
+          {currency && (
             <div className="text-xs text-gray-400 text-center mb-2">
-              {businessSector} • {currency}
+              Currency: {currency} ({currencySymbol})
             </div>
           )}
 
           {/* Divider */}
           <hr className="border-t border-gray-200 mb-6" />
 
-          {/* "Your score explained;" - CENTERED */}
+          {/* "Your score explained;" */}
           <h2 className="text-base font-medium text-gray-900 mb-4 text-center">Your score explained;</h2>
           
-          {/* Explanation text card - #FFF8F8 */}
+          {/* Explanation text card */}
           <div className="bg-[#FFF8F8] rounded-[20px] p-5 mb-10">
             <div className="space-y-3 text-center">
               <p className="text-sm text-gray-600 leading-relaxed">
-                Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-              </p>
-              <p className="text-sm text-gray-600 leading-relaxed">
-                Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+                {explanation || "Your business shows signs of financial stress in key areas."}
               </p>
             </div>
           </div>

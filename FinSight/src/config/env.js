@@ -7,12 +7,11 @@
 const config = {
   // API Configuration
   api: {
-    url: process.env.REACT_APP_API_URL || 'https://api.finsight.com',
-    version: process.env.REACT_APP_API_VERSION || 'v1',
+    url: process.env.REACT_APP_API_URL || 'https://finsight-app-f357.onrender.com',
+    version: process.env.REACT_APP_API_VERSION || '',
     baseUrl: () => {
-      const base = config.api.url;
-      const version = config.api.version;
-      return version ? `${base}/${version}` : base;
+      // FIXED: Return clean URL without any comments
+      return 'https://finsight-app-f357.onrender.com';
     },
   },
 
