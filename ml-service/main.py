@@ -17,16 +17,12 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "https://finsight-app.vercel.app",
-        "https://finsight.com"
-    ],
+    allow_origins=["*"], # Allows your new Vercel link automatically
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"], # Explicitly allowing OPTIONS for preflight
+    allow_methods=["*"], 
     allow_headers=["*"],
 )
+
 # Initialize Groq (Ensure GROQ_API_KEY is in your Render Environment Variables)
 client = groq.Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
@@ -199,13 +195,19 @@ def health_check():
 
 @app.options("/{full_path:path}")
 async def options_handler(request: Request, full_path: str):
+    # Get the origin of the person making the request
+    origin = request.headers.get("Origin")
+    # Get the headers they are trying to use
+    requested_headers = request.headers.get("Access-Control-Request-Headers", "*")
+    
     return JSONResponse(
         content={"status": "ok"},
         headers={
-            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Origin": origin if origin else "*", 
             "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Allow-Headers": requested_headers,
             "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Max-Age": "600",
         },
     )
 
