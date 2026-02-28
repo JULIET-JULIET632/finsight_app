@@ -196,23 +196,7 @@ def run_prediction(data: BusinessInput, is_simulation: bool = False):
 def health_check():
     return {"status": "online"}
 
-#@app.options("/{full_path:path}")
-async def options_handler(request: Request, full_path: str):
-    # Get the origin of the person making the request
-    origin = request.headers.get("Origin")
-    # Get the headers they are trying to use
-    requested_headers = request.headers.get("Access-Control-Request-Headers", "*")
-    
-    return JSONResponse(
-        content={"status": "ok"},
-        headers={
-            "Access-Control-Allow-Origin": origin if origin else "*", 
-            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-            "Access-Control-Allow-Headers": requested_headers,
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Max-Age": "600",
-        },
-    )
+
 
 @app.post("/diagnose")
 def diagnose(data: BusinessInput):
