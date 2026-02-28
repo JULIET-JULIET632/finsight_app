@@ -17,9 +17,12 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allows your new Vercel link automatically
+    allow_origins=[
+        "http://localhost:3000",
+        "https://finsightaiapp.vercel.app"
+    ],
     allow_credentials=True,
-    allow_methods=["*"], 
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -193,7 +196,7 @@ def run_prediction(data: BusinessInput, is_simulation: bool = False):
 def health_check():
     return {"status": "online"}
 
-@app.options("/{full_path:path}")
+#@app.options("/{full_path:path}")
 async def options_handler(request: Request, full_path: str):
     # Get the origin of the person making the request
     origin = request.headers.get("Origin")
