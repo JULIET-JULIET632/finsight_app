@@ -18,6 +18,8 @@ const ResultsDashboard = () => {
   const [healthScore, setHealthScore] = useState(48);
   const [breakdown, setBreakdown] = useState([]);
   const [explanation, setExplanation] = useState('');
+  const [statusText, setStatusText] = useState('Needs Improvement');
+  const [statusColor, setStatusColor] = useState('#EFB700'); // Default yellow
 
   // SECURITY MEASURE: Authentication check on mount
   useEffect(() => {
@@ -36,15 +38,18 @@ const ResultsDashboard = () => {
         }
 
         // Load diagnosis data from context or session storage
-        if (diagnosisData) {
-          setHealthScore(diagnosisData.health_score);
+        let score = 48;
+        if (diagnosisData && diagnosisData.health_score) {
+          score = diagnosisData.health_score;
+          setHealthScore(score);
           setBreakdown(formatBreakdown(diagnosisData.breakdown));
           setExplanation(diagnosisData.explanation);
         } else {
           const storedData = sessionStorage.getItem('diagnosisResult');
           if (storedData) {
             const parsedData = JSON.parse(storedData);
-            setHealthScore(parsedData.health_score);
+            score = parsedData.health_score;
+            setHealthScore(score);
             setBreakdown(formatBreakdown(parsedData.breakdown));
             setExplanation(parsedData.explanation);
           }
@@ -60,6 +65,23 @@ const ResultsDashboard = () => {
 
     validateSession();
   }, [navigate, diagnosisData]);
+
+  // Update status text and color based on score
+  useEffect(() => {
+    if (healthScore >= 80) {
+      setStatusText('Excellent');
+      setStatusColor('#10B981'); // Green
+    } else if (healthScore >= 60) {
+      setStatusText('Good');
+      setStatusColor('#F59E0B'); // Yellow/Orange
+    } else if (healthScore >= 40) {
+      setStatusText('Needs Improvement');
+      setStatusColor('#F97316'); // Orange
+    } else {
+      setStatusText('At Risk');
+      setStatusColor('#EF4444'); // Red
+    }
+  }, [healthScore]);
 
   // Function to determine color based on percentage
   const getScoreColor = (percentage) => {
@@ -93,8 +115,8 @@ const ResultsDashboard = () => {
     return '#EF4444'; // red
   };
 
-  // Get pill color for Needs Improvement
-  const getNeedsImprovementColor = () => {
+  // Get pill color for status
+  const getStatusPillColor = () => {
     if (healthScore >= 80) return '#10B981'; // green
     if (healthScore >= 60) return '#F59E0B'; // yellow/orange
     if (healthScore >= 40) return '#F97316'; // orange
@@ -198,17 +220,17 @@ const ResultsDashboard = () => {
             <span className="text-base text-gray-400">Out of 100</span>
           </div>
           
-          {/* Needs Improvement - ROUNDED RECTANGLE with colored stroke */}
+          {/* Status - NOW DYNAMIC based on score! */}
           <div className="flex justify-center mb-8">
             <div 
               className="px-6 py-2 rounded-full"
               style={{ 
-                border: `2px solid ${getNeedsImprovementColor()}`,
+                border: `2px solid ${getStatusPillColor()}`,
                 backgroundColor: 'transparent'
               }}
             >
-              <span className="text-sm font-medium" style={{ color: getNeedsImprovementColor() }}>
-                Needs Improvement
+              <span className="text-sm font-medium" style={{ color: getStatusPillColor() }}>
+                {statusText}
               </span>
             </div>
           </div>

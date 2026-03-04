@@ -37,7 +37,6 @@ const apiRequest = async (endpoint, options = {}) => {
     console.log('ENDPOINT:', endpoint);
     console.log('METHOD:', options.method || 'GET');
 
-    // 🔥 FIXED: Use dynamic URL instead of hardcoded /diagnose
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
       headers,
@@ -112,12 +111,7 @@ export const diagnoseBusiness = async (businessData) => {
 /**
  * 2. Strategy Simulation (/simulate)
  */
-/**
- * 2. Strategy Simulation (/simulate)
- * Purpose: Recalculates health based on user-driven adjustments
- */
 export const simulateStrategy = async (originalData, adjustments) => {
-  // SECURITY: Sanitize input data - FORCE ALL NUMBERS TO FLOATS
   const sanitizedOriginal = {
     inventory_days: parseFloat(originalData.daysToSell) || 0.0,
     monthly_cash_surplus: parseFloat(originalData.monthlyProfit) || 0.0,
@@ -129,7 +123,6 @@ export const simulateStrategy = async (originalData, adjustments) => {
     currency: originalData.currency || 'USD',
   };
 
-  // Format adjustments - ensure they're floats
   const sanitizedAdjustments = {};
   Object.keys(adjustments).forEach(key => {
     if (adjustments[key] !== 0) {
@@ -137,14 +130,12 @@ export const simulateStrategy = async (originalData, adjustments) => {
     }
   });
 
-  // FIX: Wrap original_data as per API docs
   const payload = {
     original_data: sanitizedOriginal,
     adjustments: sanitizedAdjustments,
   };
 
-  // DEBUG: See exactly what's being sent
-  console.log('📤 SIMULATE PAYLOAD (FLOATS):', JSON.stringify(payload, null, 2));
+  console.log('📤 SIMULATE PAYLOAD:', JSON.stringify(payload, null, 2));
 
   const response = await apiRequest('/simulate', {
     method: 'POST',
@@ -165,16 +156,33 @@ export const getCoachAdvice = async (simulationResult) => {
     adjusted_data: simulationResult.adjusted_data,
   };
 
-  const response = await apiRequest('/api/coach', {
+  console.log('📤 COACH PAYLOAD:', payload);
+
+  const COACH_API_URL = 'https://backend-ywt0.onrender.com/api/coach';
+  
+  const response = await fetch(COACH_API_URL, {
     method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': `Bearer ${getAuthToken()}`,
+      'X-CSRF-Token': getCookie('XSRF-TOKEN')
+    },
     body: JSON.stringify(payload),
+    credentials: 'include',
   });
 
-  return handleResponse(response);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || 'Coach API failed');
+  }
+
+  return response.json();
 };
 
 /**
  * 4. Report Download (/api/report/download)
+ * UPDATED: Now returns a more descriptive error for better fallback handling
  */
 export const downloadReport = async (coachData) => {
   const payload = {
@@ -185,17 +193,26 @@ export const downloadReport = async (coachData) => {
     growth_tips: coachData.growth_tips,
   };
 
-  const response = await apiRequest('/api/report/download', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  console.log('📤 DOWNLOAD PAYLOAD:', payload);
 
-  if (!response.ok) {
-    throw new Error('Failed to generate report');
+  try {
+    const response = await apiRequest('/api/report/download', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      // Throw a descriptive error for the hook to catch
+      throw new Error(`Download API returned ${response.status}: ${response.statusText}`);
+    }
+
+    const blob = await response.blob();
+    return blob;
+  } catch (error) {
+    console.error('Download API error:', error);
+    // Re-throw so the hook can catch it and use fallback
+    throw error;
   }
-
-  const blob = await response.blob();
-  return blob;
 };
 
 // ==================== HELPER FUNCTIONS ====================

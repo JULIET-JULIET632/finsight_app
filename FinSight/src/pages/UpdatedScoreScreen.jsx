@@ -3,19 +3,44 @@ import { useNavigate } from 'react-router-dom';
 import { sanitizeInput } from '../utils/sanitize';
 import { getCookie, generateCSRFToken } from '../utils/cookies';
 import { getAuthToken, verifyToken } from '../utils/token';
+import { useAppContext } from '../context/AppContext';
 
 const UpdatedScoreScreen = () => {
   const navigate = useNavigate();
-  const [isButtonHovered, setIsButtonHovered] = useState(false);
+  const { simulationData, diagnosisData } = useAppContext();
+  
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  const score = 65;
-  const beforeScore = 81;
-  const afterScore = 64;
+  // Data from simulation - initialize with defaults
+  const [beforeScore, setBeforeScore] = useState(0);
+  const [afterScore, setAfterScore] = useState(0);
+  const [scoreImpact, setScoreImpact] = useState(0);
+  const [statusText, setStatusText] = useState('');
 
-  // SECURITY MEASURE 1: Authentication check on mount
+  // Get score color based on value
+  const getScoreColor = (score) => {
+    if (score >= 80) return '#10B981';
+    if (score >= 60) return '#F59E0B';
+    if (score >= 40) return '#F97316';
+    return '#EF4444';
+  };
+
+  const getStatusTextFromScore = (score) => {
+    if (score >= 80) return 'Excellent';
+    if (score >= 60) return 'Good';
+    if (score >= 40) return 'Fairly Good';
+    return 'At Risk';
+  };
+
+  const getStatusColor = (score) => {
+    if (score >= 80) return '#10B981';
+    if (score >= 60) return '#F59E0B';
+    if (score >= 40) return '#F97316';
+    return '#EF4444';
+  };
+
   useEffect(() => {
     const validateSession = async () => {
       try {
@@ -26,15 +51,79 @@ const UpdatedScoreScreen = () => {
           return;
         }
 
-        // SECURITY MEASURE 2: CSRF token verification
         const csrfToken = getCookie('XSRF-TOKEN');
         if (!csrfToken) {
           generateCSRFToken();
         }
 
+        // Get original score from diagnosis (ResultsDashboard)
+        let originalScore = 58;
+        const storedDiagnosis = sessionStorage.getItem('diagnosisResult');
+        
+        if (diagnosisData && diagnosisData.health_score) {
+          originalScore = diagnosisData.health_score;
+          console.log('1️⃣ Original score from diagnosisData:', originalScore);
+        } else if (storedDiagnosis) {
+          try {
+            const parsed = JSON.parse(storedDiagnosis);
+            originalScore = parsed.health_score || 58;
+            console.log('1️⃣ Original score from sessionStorage:', originalScore);
+          } catch (e) {
+            console.error('Error parsing storedDiagnosis:', e);
+          }
+        }
+
+        // CRITICAL: Get simulation results - this is the score from the sliders!
+        let newScore = originalScore;
+        let impact = 0;
+        const storedSimulation = sessionStorage.getItem('simulationResults');
+        
+        if (storedSimulation) {
+          try {
+            const parsed = JSON.parse(storedSimulation);
+            console.log('2️⃣ RAW SIMULATION DATA FROM STORAGE:', parsed);
+            
+            // Use the currentScore from simulation (this is what user sees)
+            if (parsed.newScore !== undefined) {
+              newScore = parsed.newScore;
+              console.log('3️⃣ USING newScore from simulation:', newScore);
+            }
+            
+            if (parsed.scoreImpact !== undefined) {
+              impact = parsed.scoreImpact;
+            } else {
+              impact = newScore - originalScore;
+            }
+            
+            console.log('4️⃣ Final - Original:', originalScore, 'New:', newScore, 'Impact:', impact);
+            
+          } catch (e) {
+            console.error('Error parsing storedSimulation:', e);
+          }
+        } else if (simulationData && simulationData.newScore) {
+          console.log('2️⃣ Using simulationData from context:', simulationData);
+          newScore = simulationData.newScore;
+          impact = simulationData.scoreImpact || (newScore - originalScore);
+        } else {
+          console.log('⚠️ No simulation data found, using original score');
+        }
+        
+        // Set all the values
+        setBeforeScore(originalScore);
+        setAfterScore(newScore);
+        setScoreImpact(impact);
+        setStatusText(getStatusTextFromScore(newScore));
+        
+        console.log('5️⃣ FINAL STATE:', {
+          beforeScore: originalScore,
+          afterScore: newScore,
+          scoreImpact: impact,
+          statusText: getStatusTextFromScore(newScore)
+        });
+
         setIsAuthenticated(true);
       } catch (err) {
-        // SECURITY MEASURE 3: User-friendly error messages
+        console.error('❌ Error in validateSession:', err);
         setError('Authentication failed. Please try again.');
       } finally {
         setIsLoading(false);
@@ -42,54 +131,21 @@ const UpdatedScoreScreen = () => {
     };
 
     validateSession();
-  }, [navigate]);
+  }, [navigate, simulationData, diagnosisData]);
 
-  // Get circle color based on score
-  const getCircleColor = () => {
-    if (score >= 80) return '#10B981'; // green
-    if (score >= 60) return '#EFB700'; // gold/yellow
-    if (score >= 40) return '#F97316'; // orange
-    return '#EF4444'; // red
-  };
-
-  // Calculate conic gradient for circle fill based on score percentage
-  const getCircleGradient = () => {
-    const percentage = score; // score is out of 100
-    const baseColor = getCircleColor();
-    const emptyColor = '#E5E7EB'; // light gray
-    
-    if (percentage >= 100) {
-      return baseColor;
-    }
-    return `conic-gradient(${baseColor} 0deg ${percentage * 3.6}deg, ${emptyColor} ${percentage * 3.6}deg 360deg)`;
-  };
-
-  const handleClick = () => {
-    // SECURITY MEASURE 4: CSRF token regeneration on navigation
-    generateCSRFToken();
-    navigate('/ai-coach');
-  };
-
-  const getButtonColor = () => {
-    if (isButtonHovered) return '#1A4A4A';
-    return '#2C6C71';
-  };
-
-  // SECURITY MEASURE 5: Loading state
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4" style={{ fontFamily: 'Poppins' }}>
+      <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4">
         <div className="w-[395px] bg-white rounded-[30px] shadow-xl overflow-hidden relative flex items-center justify-center">
-          <p className="text-center text-gray-500">Loading...</p>
+          <p className="text-center text-gray-500">Loading your updated score...</p>
         </div>
       </div>
     );
   }
 
-  // SECURITY MEASURE 6: Error state with user-friendly message
   if (error) {
     return (
-      <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4" style={{ fontFamily: 'Poppins' }}>
+      <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4">
         <div className="w-[395px] bg-white rounded-[30px] shadow-xl overflow-hidden relative flex items-center justify-center">
           <div className="text-center p-6">
             <p className="text-red-500 mb-4">{error}</p>
@@ -106,16 +162,16 @@ const UpdatedScoreScreen = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4" style={{ fontFamily: 'Poppins' }}>
+    <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4">
       <div className="w-[395px] bg-white rounded-[30px] shadow-xl overflow-hidden relative">
-        {/* SECURITY MEASURE 7: CSRF token on back navigation */}
+        {/* Header with back arrow */}
         <div className="absolute top-6 left-0 right-0 flex items-center justify-center z-10">
           <button 
             onClick={() => {
               generateCSRFToken();
               navigate('/simulation');
             }}
-            className="absolute left-4 text-xl text-gray-500 hover:text-gray-700 transition-colors duration-200"
+            className="absolute left-4 text-xl text-gray-500 hover:text-gray-700"
             style={{ fontSize: '24px', fontWeight: '300' }}
           >
             &lt;
@@ -126,52 +182,55 @@ const UpdatedScoreScreen = () => {
         </div>
 
         <div className="px-6 pt-24 pb-8">
-          {/* Score Circle - Same as Results Screen */}
-          <div className="flex justify-center items-center mb-4">
+          {/* Score Circle - Shows AFTER score (what user got from sliders) */}
+          <div className="flex justify-center items-center mb-2">
             <div 
               className="w-32 h-32 rounded-full flex items-center justify-center relative"
               style={{ 
-                background: score >= 100 ? getCircleColor() : getCircleGradient(),
+                background: `conic-gradient(${getScoreColor(afterScore)} 0deg ${afterScore * 3.6}deg, #E5E7EB ${afterScore * 3.6}deg 360deg)`,
                 padding: '4px'
               }}
             >
-              {/* Inner white circle for clean background */}
-              <div className="w-full h-full rounded-full bg-white flex flex-col items-center justify-center">
-                <span className="text-4xl font-bold text-[#2C6C71]">{score}</span>
-                <span className="text-xs text-gray-400">/100</span>
+              <div className="w-full h-full rounded-full bg-white flex items-center justify-center">
+                <span className="text-4xl font-bold text-[#2C6C71]">{afterScore}</span>
               </div>
             </div>
           </div>
           
-          {/* Fairly Good and +3pts on same line with borders */}
+          {/* Out of 100 */}
+          <div className="text-center mb-2">
+            <span className="text-base text-gray-400">Out of 100</span>
+          </div>
+          
+          {/* Status and Points */}
           <div className="flex items-center justify-center gap-4 mb-8">
             <span 
               className="text-lg font-medium px-4 py-1.5 rounded-full border-2"
               style={{ 
-                color: '#EFB700',
-                borderColor: '#EFB700',
+                color: getStatusColor(afterScore),
+                borderColor: getStatusColor(afterScore),
                 backgroundColor: 'transparent'
               }}
             >
-              Fairly Good
+              {statusText}
             </span>
             <span 
               className="text-lg font-bold px-4 py-1.5 rounded-full border-2"
               style={{ 
-                color: '#12AE00',
-                borderColor: '#12AE00',
+                color: scoreImpact >= 0 ? '#12AE00' : '#EF4444',
+                borderColor: scoreImpact >= 0 ? '#12AE00' : '#EF4444',
                 backgroundColor: 'transparent'
               }}
             >
-              +3pts
+              {scoreImpact >= 0 ? '+' : ''}{scoreImpact}pts
             </span>
           </div>
 
-          {/* Before Vs After Card with Border #998F8F */}
+          {/* Before Vs After Card */}
           <div className="border-2 rounded-[20px] p-5 mb-8" style={{ borderColor: '#998F8F' }}>
             <h2 className="text-base font-medium mb-3" style={{ color: '#998F8F' }}>Before Vs After</h2>
             
-            {/* Before Simulation Dash */}
+            {/* Before - Original score */}
             <div className="mb-4">
               <div className="flex justify-between items-center mb-1">
                 <span className="text-sm" style={{ color: '#D9D9D9' }}>Before Simulation</span>
@@ -188,7 +247,7 @@ const UpdatedScoreScreen = () => {
               </div>
             </div>
             
-            {/* After Simulation Dash */}
+            {/* After - Score from simulation sliders */}
             <div>
               <div className="flex justify-between items-center mb-1">
                 <span className="text-sm" style={{ color: '#D9D9D9' }}>After Simulation</span>
@@ -222,28 +281,27 @@ const UpdatedScoreScreen = () => {
             </div>
           </div>
 
-          {/* View Recommendations Button - ONE LINE with reduced font size */}
+          {/* View Recommendations Button */}
           <div className="flex justify-center">
             <button
-              onClick={handleClick}
-              onMouseEnter={() => setIsButtonHovered(true)}
-              onMouseLeave={() => setIsButtonHovered(false)}
+              onClick={() => {
+                generateCSRFToken();
+                navigate('/ai-coach');
+              }}
               disabled={!isAuthenticated}
               className="font-semibold py-3 px-6 shadow-md transition-all duration-200 transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
               style={{ 
-                backgroundColor: getButtonColor(),
+                backgroundColor: '#2C6C71',
                 color: 'white', 
                 borderRadius: '10px',
-                width: 'auto',
-                minWidth: '180px',
-                fontSize: '14px' // Reduced font size to fit in one line
+                fontSize: '14px',
+                minWidth: '180px'
               }}
             >
               View Recommendations
             </button>
           </div>
           
-          {/* Bottom spacing */}
           <div className="h-4"></div>
         </div>
       </div>

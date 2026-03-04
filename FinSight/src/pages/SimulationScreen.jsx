@@ -18,20 +18,54 @@ const SimulationScreen = () => {
   const [currencySymbol, setCurrencySymbol] = useState('$');
   const [formData, setFormData] = useState({});
   const [selectedItems, setSelectedItems] = useState([]);
+  const [selectedImpactItems, setSelectedImpactItems] = useState([]);
   const [healthScore, setHealthScore] = useState(58);
+  const [currentScore, setCurrentScore] = useState(58);
+  const [scoreImpact, setScoreImpact] = useState(0);
   
-  // Slider states - from -100 to 100 with 0 at center
-  const [sliders, setSliders] = useState({
-    monthlyExpenses: 0,
-    monthlySales: 0,
-    cashAvailable: 0
-  });
+  // Slider states
+  const [sliders, setSliders] = useState({});
+
+  // Get score color based on value
+  const getScoreColor = (score) => {
+    if (score >= 80) return '#10B981';
+    if (score >= 60) return '#F59E0B';
+    if (score >= 40) return '#F97316';
+    return '#EF4444';
+  };
+
+  // Get status text based on score
+  const getStatusText = (score) => {
+    if (score >= 80) return 'Excellent';
+    if (score >= 60) return 'Good';
+    if (score >= 40) return 'Warning';
+    return 'At Risk';
+  };
+
+  // Calculate real-time score impact based on selected items
+  const calculateScoreImpact = () => {
+    let impact = 0;
+    
+    selectedImpactItems.forEach(item => {
+      const sliderValue = sliders[`slider_${item.id}`] || 0;
+      
+      // Different impact weights based on impact level
+      if (item.impactLevel === 'high') {
+        impact += (sliderValue * -0.25); // High impact = 25% change
+      } else if (item.impactLevel === 'medium') {
+        impact += (sliderValue * -0.15); // Medium impact = 15% change
+      } else {
+        impact += (sliderValue * -0.08); // Low impact = 8% change
+      }
+    });
+    
+    return Math.round(impact);
+  };
 
   // SECURITY MEASURE 1: Authentication check on mount
   useEffect(() => {
     const validateSession = async () => {
       try {
-        // Check for auth token
         const token = getAuthToken();
         if (!token || !verifyToken(token)) {
           setError('Your session has expired. Please start over.');
@@ -39,7 +73,6 @@ const SimulationScreen = () => {
           return;
         }
 
-        // SECURITY MEASURE 2: CSRF token verification
         const csrfToken = getCookie('XSRF-TOKEN');
         if (!csrfToken) {
           generateCSRFToken();
@@ -50,11 +83,11 @@ const SimulationScreen = () => {
         const storedCurrency = sessionStorage.getItem('currency') || 'USD';
         const storedSymbol = sessionStorage.getItem('currencySymbol') || '$';
         const storedSelected = sessionStorage.getItem('selectedItems');
+        const storedImpactItems = sessionStorage.getItem('selectedImpactItems');
         const storedDiagnosis = sessionStorage.getItem('diagnosisResult');
         
         if (storedData) {
           const parsedData = JSON.parse(storedData);
-          // SECURITY MEASURE 3: Input sanitization (XSS prevention)
           const sanitizedData = {};
           Object.keys(parsedData).forEach(key => {
             sanitizedData[key] = sanitizeInput(parsedData[key]);
@@ -66,22 +99,37 @@ const SimulationScreen = () => {
           setSelectedItems(JSON.parse(storedSelected));
         }
         
+        if (storedImpactItems) {
+          const items = JSON.parse(storedImpactItems);
+          setSelectedImpactItems(items);
+          
+          // Initialize sliders for each selected item
+          const initialSliders = {};
+          items.forEach((item, index) => {
+            initialSliders[`slider_${item.id}`] = 0;
+          });
+          setSliders(initialSliders);
+          
+          console.log('✅ Loaded selected impact items:', items);
+        }
+        
         // Get health score from diagnosis data
+        let score = 58;
         if (diagnosisData && diagnosisData.health_score) {
-          setHealthScore(diagnosisData.health_score);
+          score = diagnosisData.health_score;
         } else if (storedDiagnosis) {
           const parsed = JSON.parse(storedDiagnosis);
-          if (parsed.health_score) {
-            setHealthScore(parsed.health_score);
-          }
+          score = parsed.health_score || 58;
         }
+        
+        setHealthScore(score);
+        setCurrentScore(score);
         
         setCurrency(storedCurrency);
         setCurrencySymbol(storedSymbol);
 
         setIsAuthenticated(true);
       } catch (err) {
-        // SECURITY MEASURE 4: User-friendly error messages (no technical details)
         setError('Authentication failed. Please try again.');
       } finally {
         setIsLoading(false);
@@ -91,112 +139,111 @@ const SimulationScreen = () => {
     validateSession();
   }, [navigate, diagnosisData]);
 
-  // Calculate base score from form data
-  const calculateBaseScore = () => {
-    return healthScore;
+  // Update score in real-time whenever any slider changes
+  useEffect(() => {
+    const impact = calculateScoreImpact();
+    setScoreImpact(impact);
+    const newScore = Math.min(100, Math.max(0, healthScore + impact));
+    setCurrentScore(newScore);
+    console.log('🔄 Score updated:', { healthScore, impact, newScore });
+  }, [sliders, healthScore, selectedImpactItems]);
+
+  const handleSliderChange = (sliderId, value) => {
+    generateCSRFToken();
+    setSliders(prev => ({ ...prev, [sliderId]: parseInt(value) }));
   };
 
-  // FORCING +3 POINTS as shown in screenshot
-  const scoreImpact = 3;
-  const baseScore = calculateBaseScore();
-  const newScore = Math.min(100, Math.max(0, baseScore + scoreImpact));
+  const handleSeeImpact = async () => {
+    generateCSRFToken();
+    
+    try {
+      const adjustments = {};
+      
+      // Build adjustments based on selected items
+      selectedImpactItems.forEach(item => {
+        const sliderValue = sliders[`slider_${item.id}`] || 0;
+        if (sliderValue !== 0) {
+          // Map to backend field names
+          const fieldMap = {
+            1: 'inventory_days',
+            2: 'monthly_cash_surplus',
+            3: 'monthly_wages',
+            4: 'monthly_loan_payment',
+            5: 'total_assets',
+            6: 'total_debt',
+          };
+          const backendField = fieldMap[item.id];
+          if (backendField) {
+            adjustments[backendField] = sliderValue;
+          }
+        }
+      });
+      
+      console.log('📤 Sending adjustments:', adjustments);
+      
+      // Save simulation results
+      const results = {
+        baseScore: healthScore,
+        newScore: currentScore,
+        scoreImpact: scoreImpact,
+        selectedItems: selectedImpactItems,
+        timestamp: Date.now()
+      };
+      
+      sessionStorage.setItem('simulationResults', JSON.stringify(results));
+      
+      // Try API
+      try {
+        const result = await runSimulation(formData, adjustments);
+        setSimulationData(result);
+      } catch (err) {
+        console.log('⚠️ API failed, using local data');
+      }
+      
+      navigate('/updated-score');
+      
+    } catch (err) {
+      console.log('❌ Error:', err);
+      sessionStorage.setItem('simulationResults', JSON.stringify({
+        baseScore: healthScore,
+        newScore: currentScore,
+        scoreImpact,
+        selectedItems: selectedImpactItems,
+        timestamp: Date.now()
+      }));
+      navigate('/updated-score');
+    }
+  };
 
-  // Get slider color based on value (negative = red gradient, positive = green gradient)
+  // Get slider color based on value
   const getSliderTrackStyle = (value) => {
-    const percentage = ((value + 100) / 200) * 100; // Convert -100..100 to 0..100
+    const percentage = ((value + 100) / 200) * 100;
     
     if (value < 0) {
-      // Red gradient for negative values
       return {
         background: `linear-gradient(90deg, #ef4444 0%, #fca5a5 ${percentage}%, #e5e7eb ${percentage}%, #e5e7eb 100%)`
       };
     } else if (value > 0) {
-      // Green gradient for positive values
       return {
         background: `linear-gradient(90deg, #e5e7eb 0%, #e5e7eb 50%, #86efac ${percentage}%, #22c55e 100%)`
       };
     } else {
-      // Gray for zero
       return {
         background: '#e5e7eb'
       };
     }
   };
 
-  const handleSliderChange = (name, value) => {
-    // SECURITY MEASURE 5: CSRF token regeneration on user actions
-    generateCSRFToken();
-    setSliders(prev => ({ ...prev, [name]: parseInt(value) }));
-  };
-
-  const handleSeeImpact = async () => {
-    // SECURITY MEASURE 6: CSRF token regeneration on navigation
-    generateCSRFToken();
-    
-    try {
-      // Prepare adjustments based on selected items - USE CORRECT BACKEND FIELD NAMES
-const adjustments = {};
-
-// Map slider values to backend field names (from your API docs)
-selectedItems.forEach(id => {
-  if (id === 1) { // Days to Sell Stock
-    adjustments['inventory_days'] = sliders.monthlyExpenses;
-  }
-  if (id === 2) { // Monthly Profit
-    adjustments['monthly_cash_surplus'] = sliders.monthlySales;
-  }
-  if (id === 3) { // Monthly Staff Salaries
-    adjustments['monthly_wages'] = sliders.monthlyExpenses;
-  }
-  if (id === 4) { // Monthly Loan Payments
-    adjustments['monthly_loan_payment'] = sliders.monthlyExpenses;
-  }
-  if (id === 5) { // Total Assets
-    adjustments['total_assets'] = sliders.cashAvailable;
-  }
-  if (id === 6) { // Total Debt
-    adjustments['total_debt'] = sliders.monthlyExpenses;
-  }
-});
-      
-      // Call the simulation API
-      const result = await runSimulation(formData, adjustments);
-      
-      // Store simulation results
-      setSimulationData(result);
-      sessionStorage.setItem('simulationResults', JSON.stringify({
-        baseScore: healthScore,
-        newScore: result.final_score || newScore,
-        scoreImpact: (result.final_score || newScore) - healthScore,
-        sliders
-      }));
-      
-      navigate('/updated-score');
-    } catch (err) {
-      // Fallback to old behavior if API fails
-      console.log('API failed, using fallback', err);
-      sessionStorage.setItem('simulationResults', JSON.stringify({
-        baseScore,
-        newScore,
-        scoreImpact,
-        sliders
-      }));
-      navigate('/updated-score');
-    }
-  };
-
-  // SECURITY MEASURE 7: Loading state to prevent interaction during validation
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4">
         <div className="w-[395px] bg-white rounded-[30px] shadow-xl overflow-hidden relative flex items-center justify-center">
-          <p className="text-center text-gray-500">Loading...</p>
+          <p className="text-center text-gray-500">Loading simulation...</p>
         </div>
       </div>
     );
   }
 
-  // SECURITY MEASURE 8: Error state with user-friendly message
   if (error || simulationError) {
     return (
       <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4">
@@ -222,7 +269,7 @@ selectedItems.forEach(id => {
         <div className="absolute top-6 left-0 right-0 flex items-center justify-center z-10">
           <button 
             onClick={() => {
-              generateCSRFToken(); // SECURITY MEASURE 9: Token on back navigation
+              generateCSRFToken();
               navigate('/simulation-selection');
             }}
             className="absolute left-4 text-xl text-gray-500 hover:text-gray-700 transition-colors duration-200"
@@ -241,108 +288,77 @@ selectedItems.forEach(id => {
             Drag each slider to see how improvements affect your score in real time.
           </p>
           
-          {/* Monthly Expenses Slider - WITH CARD BORDER #998F8F */}
-          <div className="border-2 rounded-[15px] p-4 mb-4" style={{ borderColor: '#998F8F' }}>
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-base font-semibold text-gray-800">Monthly Expenses</span>
-              <span className="text-base font-medium text-gray-900">
-                {sliders.monthlyExpenses > 0 ? '+' : ''}{sliders.monthlyExpenses}%
-              </span>
+          {/* DYNAMIC SLIDERS - Only show what user selected */}
+          {selectedImpactItems.map(item => (
+            <div key={item.id} className="border-2 rounded-[15px] p-4 mb-4" style={{ borderColor: '#998F8F' }}>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-base font-semibold text-gray-800">{item.title}</span>
+                <span className="text-base font-medium text-gray-900">
+                  {sliders[`slider_${item.id}`] > 0 ? '+' : ''}{sliders[`slider_${item.id}`] || 0}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min="-100"
+                max="100"
+                value={sliders[`slider_${item.id}`] || 0}
+                onChange={(e) => handleSliderChange(`slider_${item.id}`, e.target.value)}
+                className="w-full h-2 rounded-lg appearance-none cursor-pointer"
+                style={getSliderTrackStyle(sliders[`slider_${item.id}`] || 0)}
+              />
+              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                <span>-100%</span>
+                <span>0%</span>
+                <span>+100%</span>
+              </div>
+              <p className="text-[10px] text-gray-500 mt-2">
+                {item.impactLevel === 'high' ? '🔴 High Impact - Dramatic effect' :
+                 item.impactLevel === 'medium' ? '🟡 Medium Impact - Moderate effect' :
+                 '🟢 Low Impact - Slight effect'}
+              </p>
             </div>
-            <input
-              type="range"
-              min="-100"
-              max="100"
-              value={sliders.monthlyExpenses}
-              onChange={(e) => handleSliderChange('monthlyExpenses', e.target.value)}
-              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-              style={getSliderTrackStyle(sliders.monthlyExpenses)}
-            />
-            <div className="flex justify-between text-xs text-gray-400 mt-1">
-              <span>-100%</span>
-              <span>0%</span>
-              <span>+100%</span>
-            </div>
-          </div>
+          ))}
 
-          {/* Monthly Sales Slider - WITH CARD BORDER #998F8F */}
-          <div className="border-2 rounded-[15px] p-4 mb-4" style={{ borderColor: '#998F8F' }}>
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-base font-semibold text-gray-800">Monthly Sales</span>
-              <span className="text-base font-medium text-gray-900">
-                {sliders.monthlySales > 0 ? '+' : ''}{sliders.monthlySales}%
-              </span>
-            </div>
-            <input
-              type="range"
-              min="-100"
-              max="100"
-              value={sliders.monthlySales}
-              onChange={(e) => handleSliderChange('monthlySales', e.target.value)}
-              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-              style={getSliderTrackStyle(sliders.monthlySales)}
-            />
-            <div className="flex justify-between text-xs text-gray-400 mt-1">
-              <span>-100%</span>
-              <span>0%</span>
-              <span>+100%</span>
-            </div>
-          </div>
-
-          {/* Cash Available Slider - WITH CARD BORDER #998F8F */}
-          <div className="border-2 rounded-[15px] p-4 mb-6" style={{ borderColor: '#998F8F' }}>
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-base font-semibold text-gray-800">Cash Available</span>
-              <span className="text-base font-medium text-gray-900">
-                {sliders.cashAvailable > 0 ? '+' : ''}{sliders.cashAvailable}%
-              </span>
-            </div>
-            <input
-              type="range"
-              min="-100"
-              max="100"
-              value={sliders.cashAvailable}
-              onChange={(e) => handleSliderChange('cashAvailable', e.target.value)}
-              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-              style={getSliderTrackStyle(sliders.cashAvailable)}
-            />
-            <div className="flex justify-between text-xs text-gray-400 mt-1">
-              <span>-100%</span>
-              <span>0%</span>
-              <span>+100%</span>
-            </div>
-          </div>
-
-          {/* Business Health Score Card - WITH BORDER #D9D9D9 */}
+          {/* Business Health Score Card */}
           <div 
             className="bg-[#FFF8F8] rounded-[20px] p-5 mt-2 mb-6 border-2"
             style={{ borderColor: '#D9D9D9' }}
           >
-            {/* Business Health Score Text - LEFT ALIGNED with color #998F8F */}
             <div className="mb-3">
               <span className="text-sm font-medium" style={{ color: '#998F8F' }}>
                 Business Health Score
               </span>
             </div>
             
-            {/* Score and Impact side by side */}
             <div className="flex items-start justify-between px-2">
-              {/* Score section - contains score and warning under it */}
               <div>
                 <div className="flex items-center gap-1">
-                  <span className="text-4xl font-bold" style={{ color: '#EFB700' }}>{baseScore}</span>
+                  <span 
+                    className="text-4xl font-bold" 
+                    style={{ color: getScoreColor(currentScore) }}
+                  >
+                    {currentScore}
+                  </span>
                   <span className="text-2xl text-gray-400">/100</span>
                 </div>
-                {/* Warning - RIGHT UNDER THE SCORE (left-aligned with score) */}
                 <div className="text-left mt-0">
-                  <span className="text-xs font-medium" style={{ color: '#EFB700' }}>Warning!</span>
+                  <span 
+                    className="text-xs font-medium" 
+                    style={{ color: getScoreColor(currentScore) }}
+                  >
+                    {getStatusText(currentScore)}
+                  </span>
                 </div>
               </div>
               
-              {/* Score impact section - number and text stacked vertically */}
               <div className="text-right">
                 <div>
-                  <span className="text-3xl font-bold" style={{ color: '#12AE00' }}>+{scoreImpact}</span>
+                  <span 
+                    className="text-3xl font-bold" 
+                    style={{ color: scoreImpact >= 0 ? '#12AE00' : '#EF4444' }}
+                  >
+                    {scoreImpact >= 0 ? '+' : ''}{scoreImpact}
+                  </span>
                 </div>
                 <div>
                   <span className="text-xs font-medium text-black">points</span>
@@ -354,7 +370,7 @@ selectedItems.forEach(id => {
           {/* See Impact Button */}
           <button
             onClick={handleSeeImpact}
-            disabled={!isAuthenticated || simulationLoading}
+            disabled={!isAuthenticated || simulationLoading || selectedImpactItems.length === 0}
             className="w-full font-semibold py-4 px-6 rounded-[10px] shadow-md transition-all duration-200 transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ 
               backgroundColor: '#2C6C71',

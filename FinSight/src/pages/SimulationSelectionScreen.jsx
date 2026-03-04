@@ -17,12 +17,75 @@ const SimulationSelectionScreen = () => {
   const [formData, setFormData] = useState({});
   const [businessSector, setBusinessSector] = useState('');
   const [healthScore, setHealthScore] = useState(58);
+  const [impactItems, setImpactItems] = useState([]);
+
+  // Map backend field names to display names
+  const mapFieldToDisplay = (field) => {
+    const fieldMap = {
+      inventory_days: 'Days to Sell Stock',
+      monthly_cash_surplus: 'Monthly Profit',
+      monthly_wages: 'Monthly Staff Salaries',
+      monthly_loan_payment: 'Monthly Loan Payments',
+      total_assets: 'Total Assets',
+      total_debt: 'Total Debt',
+    };
+    return fieldMap[field] || field;
+  };
+
+  // Format display values
+  const formatDisplayValue = (field, value, symbol) => {
+    if (!value) return field === 'inventory_days' ? '0 days' : `${symbol} 0`;
+    const numValue = parseInt(value, 10);
+    const formattedNum = numValue.toLocaleString();
+    if (field === 'inventory_days') {
+      return `${formattedNum} days`;
+    }
+    return `${symbol} ${formattedNum}`;
+  };
+
+  // Map backend field to form field
+  const getFormFieldName = (backendField) => {
+    const mapping = {
+      'inventory_days': 'daysToSell',
+      'monthly_cash_surplus': 'monthlyProfit',
+      'monthly_wages': 'staffSalaries',
+      'monthly_loan_payment': 'loanPayments',
+      'total_assets': 'totalAssets',
+      'total_debt': 'totalDebt',
+    };
+    return mapping[backendField] || backendField;
+  };
+
+  // Get score color based on value
+  const getScoreColor = (score) => {
+    if (score >= 80) return '#10B981';
+    if (score >= 60) return '#F59E0B';
+    if (score >= 40) return '#F97316';
+    return '#EF4444';
+  };
+
+  // Get status text based on score
+  const getStatusText = (score) => {
+    if (score >= 80) return 'Excellent';
+    if (score >= 60) return 'Good';
+    if (score >= 40) return 'Warning';
+    return 'At Risk';
+  };
+
+  // Get impact multiplier for points
+  const getImpactPoints = (impactLevel) => {
+    switch(impactLevel) {
+      case 'high': return '15-30 points';
+      case 'medium': return '8-15 points';
+      case 'low': return '5-8 points';
+      default: return '5-8 points';
+    }
+  };
 
   // SECURITY MEASURE 1: Authentication check on mount
   useEffect(() => {
     const validateSession = async () => {
       try {
-        // Check for auth token
         const token = getAuthToken();
         if (!token || !verifyToken(token)) {
           setError('Your session has expired. Please start over.');
@@ -30,7 +93,6 @@ const SimulationSelectionScreen = () => {
           return;
         }
 
-        // SECURITY MEASURE 2: CSRF token verification
         const csrfToken = getCookie('XSRF-TOKEN');
         if (!csrfToken) {
           generateCSRFToken();
@@ -42,9 +104,9 @@ const SimulationSelectionScreen = () => {
         const storedSymbol = sessionStorage.getItem('currencySymbol') || '$';
         const storedSector = sessionStorage.getItem('businessSector') || '';
         
+        let parsedData = {};
         if (storedData) {
-          const parsedData = JSON.parse(storedData);
-          // SECURITY MEASURE 3: Input sanitization (XSS prevention)
+          parsedData = JSON.parse(storedData);
           const sanitizedData = {};
           Object.keys(parsedData).forEach(key => {
             sanitizedData[key] = sanitizeInput(parsedData[key]);
@@ -56,9 +118,69 @@ const SimulationSelectionScreen = () => {
         setCurrencySymbol(storedSymbol);
         setBusinessSector(sanitizeInput(storedSector));
 
-        // Get health score from diagnosis data (API result)
+        // Get health score and impacts from diagnosis data
+        let score = 58;
         if (diagnosisData && diagnosisData.health_score) {
-          setHealthScore(diagnosisData.health_score);
+          score = diagnosisData.health_score;
+          setHealthScore(score);
+
+          // BUILD IMPACT ITEMS FROM API RESPONSE
+          if (diagnosisData.impacts) {
+            const impacts = diagnosisData.impacts;
+            const items = [];
+            console.log('API Impacts received:', impacts);
+
+            // Add HIGH impact items (MASSIVE effect on score)
+            impacts.high_impact?.forEach((field) => {
+              items.push({
+                id: items.length + 1,
+                field,
+                title: mapFieldToDisplay(field),
+                value: parsedData[getFormFieldName(field)] || '0',
+                displayValue: formatDisplayValue(field, parsedData[getFormFieldName(field)], storedSymbol),
+                impact: 'HIGH IMPACT',
+                impactLevel: 'high',
+                badgeColor: '#D20303',
+                points: '15-30 points',
+                description: 'Fixing this will dramatically improve your score'
+              });
+            });
+
+            // Add MEDIUM impact items (MODERATE effect on score)
+            impacts.medium_impact?.forEach((field) => {
+              items.push({
+                id: items.length + 1,
+                field,
+                title: mapFieldToDisplay(field),
+                value: parsedData[getFormFieldName(field)] || '0',
+                displayValue: formatDisplayValue(field, parsedData[getFormFieldName(field)], storedSymbol),
+                impact: 'MEDIUM IMPACT',
+                impactLevel: 'medium',
+                badgeColor: '#EFB700',
+                points: '8-15 points',
+                description: 'Fixing this will moderately improve your score'
+              });
+            });
+
+            // Add LOW impact items (MINOR effect on score)
+            impacts.low_impact?.forEach((field) => {
+              items.push({
+                id: items.length + 1,
+                field,
+                title: mapFieldToDisplay(field),
+                value: parsedData[getFormFieldName(field)] || '0',
+                displayValue: formatDisplayValue(field, parsedData[getFormFieldName(field)], storedSymbol),
+                impact: 'LOW IMPACT',
+                impactLevel: 'low',
+                badgeColor: '#12AE00',
+                points: '5-8 points',
+                description: 'Fixing this will slightly improve your score'
+              });
+            });
+
+            setImpactItems(items);
+            console.log('Built impact items:', items);
+          }
         } else {
           // Try to get from session storage as fallback
           const storedDiagnosis = sessionStorage.getItem('diagnosisResult');
@@ -67,12 +189,59 @@ const SimulationSelectionScreen = () => {
             if (parsedDiagnosis.health_score) {
               setHealthScore(parsedDiagnosis.health_score);
             }
+            if (parsedDiagnosis.impacts) {
+              const impacts = parsedDiagnosis.impacts;
+              const items = [];
+              
+              impacts.high_impact?.forEach((field) => {
+                items.push({
+                  id: items.length + 1,
+                  field,
+                  title: mapFieldToDisplay(field),
+                  value: parsedData[getFormFieldName(field)] || '0',
+                  displayValue: formatDisplayValue(field, parsedData[getFormFieldName(field)], storedSymbol),
+                  impact: 'HIGH IMPACT',
+                  impactLevel: 'high',
+                  badgeColor: '#D20303',
+                  points: '15-30 points'
+                });
+              });
+
+              impacts.medium_impact?.forEach((field) => {
+                items.push({
+                  id: items.length + 1,
+                  field,
+                  title: mapFieldToDisplay(field),
+                  value: parsedData[getFormFieldName(field)] || '0',
+                  displayValue: formatDisplayValue(field, parsedData[getFormFieldName(field)], storedSymbol),
+                  impact: 'MEDIUM IMPACT',
+                  impactLevel: 'medium',
+                  badgeColor: '#EFB700',
+                  points: '8-15 points'
+                });
+              });
+
+              impacts.low_impact?.forEach((field) => {
+                items.push({
+                  id: items.length + 1,
+                  field,
+                  title: mapFieldToDisplay(field),
+                  value: parsedData[getFormFieldName(field)] || '0',
+                  displayValue: formatDisplayValue(field, parsedData[getFormFieldName(field)], storedSymbol),
+                  impact: 'LOW IMPACT',
+                  impactLevel: 'low',
+                  badgeColor: '#12AE00',
+                  points: '5-8 points'
+                });
+              });
+
+              setImpactItems(items);
+            }
           }
         }
 
         setIsAuthenticated(true);
       } catch (err) {
-        // SECURITY MEASURE 4: User-friendly error messages (no technical details)
         setError('Authentication failed. Please try again.');
       } finally {
         setIsLoading(false);
@@ -82,87 +251,15 @@ const SimulationSelectionScreen = () => {
     validateSession();
   }, [navigate, diagnosisData]);
 
-  // ALL 6 inputs from BusinessInfoScreen with impact levels
-  const impactItems = [
-    { 
-      id: 1, 
-      field: 'daysToSell',
-      title: 'Days to Sell Stock', 
-      value: formData.daysToSell || '0',
-      displayValue: formData.daysToSell ? `${formData.daysToSell} days` : '0 days',
-      impact: 'HIGH IMPACT',
-      impactLevel: 'high',
-      points: '15-30 points',
-      badgeColor: '#D20303', // Red for high impact
-    },
-    { 
-      id: 2, 
-      field: 'monthlyProfit',
-      title: 'Monthly Profit', 
-      value: formData.monthlyProfit || '0',
-      displayValue: formData.monthlyProfit ? `${currencySymbol} ${parseInt(formData.monthlyProfit).toLocaleString()}` : `${currencySymbol} 0`,
-      impact: 'MEDIUM IMPACT',
-      impactLevel: 'medium',
-      points: '8-15 points',
-      badgeColor: '#EFB700', // Gold/Yellow for medium impact
-    },
-    { 
-      id: 3, 
-      field: 'staffSalaries',
-      title: 'Monthly Staff Salaries', 
-      value: formData.staffSalaries || '0',
-      displayValue: formData.staffSalaries ? `${currencySymbol} ${parseInt(formData.staffSalaries).toLocaleString()}` : `${currencySymbol} 0`,
-      impact: 'MEDIUM IMPACT',
-      impactLevel: 'medium',
-      points: '8-15 points',
-      badgeColor: '#EFB700', // Gold/Yellow for medium impact
-    },
-    { 
-      id: 4, 
-      field: 'loanPayments',
-      title: 'Monthly Loan Payments', 
-      value: formData.loanPayments || '0',
-      displayValue: formData.loanPayments ? `${currencySymbol} ${parseInt(formData.loanPayments).toLocaleString()}` : `${currencySymbol} 0`,
-      impact: 'HIGH IMPACT',
-      impactLevel: 'high',
-      points: '15-30 points',
-      badgeColor: '#D20303', // Red for high impact
-    },
-    { 
-      id: 5, 
-      field: 'totalAssets',
-      title: 'Total Assets', 
-      value: formData.totalAssets || '0',
-      displayValue: formData.totalAssets ? `${currencySymbol} ${parseInt(formData.totalAssets).toLocaleString()}` : `${currencySymbol} 0`,
-      impact: 'MEDIUM IMPACT',
-      impactLevel: 'medium',
-      points: '8-15 points',
-      badgeColor: '#EFB700', // Gold/Yellow for medium impact
-    },
-    { 
-      id: 6, 
-      field: 'totalDebt',
-      title: 'Total Debt', 
-      value: formData.totalDebt || '0',
-      displayValue: formData.totalDebt ? `${currencySymbol} ${parseInt(formData.totalDebt).toLocaleString()}` : `${currencySymbol} 0`,
-      impact: 'LOW IMPACT',
-      impactLevel: 'low',
-      points: '5-8 points',
-      badgeColor: '#12AE00', // Green for low impact
-    }
-  ];
-
-  // SECURITY MEASURE 5: CSRF token regeneration on user actions
   const toggleSelect = (id) => {
-    generateCSRFToken(); // New token for state change
+    generateCSRFToken();
     setSelected(prev => 
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     );
   };
 
-  // SECURITY MEASURE 6: CSRF token regeneration on navigation
   const handleStartSimulate = () => {
-    generateCSRFToken(); // New token for navigation
+    generateCSRFToken();
     
     // Store selected items in session storage
     sessionStorage.setItem('selectedItems', JSON.stringify(selected));
@@ -173,18 +270,16 @@ const SimulationSelectionScreen = () => {
     navigate('/simulation');
   };
 
-  // SECURITY MEASURE 7: Loading state to prevent interaction during validation
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4">
         <div className="w-[395px] bg-white rounded-[30px] shadow-xl overflow-hidden relative flex items-center justify-center">
-          <p className="text-center text-gray-500">Loading...</p>
+          <p className="text-center text-gray-500">Loading impact analysis...</p>
         </div>
       </div>
     );
   }
 
-  // SECURITY MEASURE 8: Error state with user-friendly message
   if (error) {
     return (
       <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4">
@@ -206,11 +301,10 @@ const SimulationSelectionScreen = () => {
   return (
     <div className="min-h-screen bg-[#DCE5E6] flex justify-center p-4">
       <div className="w-[395px] bg-white rounded-[30px] shadow-xl overflow-hidden relative">
-        {/* Header with back arrow */}
         <div className="absolute top-6 left-0 right-0 flex items-center justify-center z-10">
           <button 
             onClick={() => {
-              generateCSRFToken(); // SECURITY MEASURE 9: Token on back navigation
+              generateCSRFToken();
               navigate('/results');
             }}
             className="absolute left-4 text-xl text-gray-500 hover:text-gray-700 transition-colors duration-200"
@@ -224,37 +318,38 @@ const SimulationSelectionScreen = () => {
         </div>
 
         <div className="px-5 pt-16 pb-24">
-          {/* Select areas card - #FFF8F8 */}
           <div className="bg-[#FFF8F8] rounded-[20px] p-5 mb-4 text-center">
             <p className="text-sm text-gray-700 leading-relaxed">
               Select areas to make improvements and we'll show you the impact on your score
             </p>
           </div>
 
-          {/* Business Risk Score card - #FFF8F8 */}
+          {/* Business Risk Score card */}
           <div className="bg-[#FFF8F8] rounded-[20px] p-5 mb-6">
             <div className="text-center mb-3">
               <span className="text-sm font-medium text-gray-700">Business Risk Score</span>
             </div>
             
-            {/* Score and Warning on the same line with MORE SPACE */}
             <div className="flex items-center justify-center gap-8 mb-0">
               <div className="flex items-center gap-1">
-                <span className="text-4xl font-bold" style={{ color: '#EFB700' }}>{healthScore}</span>
+                <span className="text-4xl font-bold" style={{ color: getScoreColor(healthScore) }}>
+                  {healthScore}
+                </span>
                 <span className="text-2xl text-gray-400">/100</span>
               </div>
               
-              {/* Warning container - #EFB700 */}
-              <span 
-                className="inline-block px-4 py-1.5 rounded-full text-sm font-bold text-white"
-                style={{ backgroundColor: '#EFB700' }}
-              >
-                Warning!
-              </span>
+              {healthScore < 60 && (
+                <span 
+                  className="inline-block px-4 py-1.5 rounded-full text-sm font-bold text-white"
+                  style={{ backgroundColor: getScoreColor(healthScore) }}
+                >
+                  {getStatusText(healthScore)}!
+                </span>
+              )}
             </div>
           </div>
 
-          {/* ALL 6 Impact Cards - #D9D9D9 background */}
+          {/* Impact Cards - DYNAMIC from API */}
           <div className="space-y-3">
             {impactItems.map(item => {
               const isSelected = selected.includes(item.id);
@@ -270,7 +365,6 @@ const SimulationSelectionScreen = () => {
                   }}
                 >
                   <div className="flex items-start gap-3">
-                    {/* Tick box - White background */}
                     <div 
                       className="w-5 h-5 rounded-md border-2 flex items-center justify-center mt-0.5 transition-colors duration-200 bg-white flex-shrink-0"
                       style={{ 
@@ -284,23 +378,24 @@ const SimulationSelectionScreen = () => {
                       )}
                     </div>
                     
-                    {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-center gap-2 mb-1">
                         <h3 className="text-xs font-medium text-gray-800">
                           {item.title}
                         </h3>
-                        {/* Impact badge */}
                         <span 
                           className="text-[10px] px-2 py-1 rounded-full font-medium text-white whitespace-nowrap flex-shrink-0"
-                          style={{ 
-                            backgroundColor: item.badgeColor
-                          }}
+                          style={{ backgroundColor: item.badgeColor }}
                         >
                           {item.impact}
                         </span>
                       </div>
                       <p className="text-xs font-semibold text-gray-800">{item.displayValue}</p>
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        {item.impactLevel === 'high' ? '🔴 Fixing this will dramatically improve your score' :
+                         item.impactLevel === 'medium' ? '🟡 Fixing this will moderately improve your score' :
+                         '🟢 Fixing this will slightly improve your score'}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -309,13 +404,11 @@ const SimulationSelectionScreen = () => {
           </div>
         </div>
 
-        {/* Fixed Bottom Section - NO LINE ABOVE */}
         <div className="absolute bottom-0 left-0 right-0 bg-white p-4">
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-600">
               Selected: {selected.length}
             </span>
-            {/* SECURITY MEASURE 10: Button disabled when not authenticated or no selection */}
             <button
               onClick={handleStartSimulate}
               disabled={!isAuthenticated || selected.length === 0}

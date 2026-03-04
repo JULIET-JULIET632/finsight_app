@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { getCoachAdvice, downloadReport } from '../services/api';
 import { getAuthToken } from '../utils/token';
 import { generateCSRFToken } from '../utils/cookies';
+import downloadScoreAsPDF from '../utils/download'; // Add this import
 import config from '../config/env';
 
 /**
@@ -68,18 +69,35 @@ export const useCoach = () => {
       // SECURITY: Generate new CSRF token
       generateCSRFToken();
 
-      // Get PDF blob
-      const blob = await downloadReport(coachData);
-
-      // Create download link
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `finsight-report-${new Date().toISOString().split('T')[0]}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      try {
+        // Try API first
+        const blob = await downloadReport(coachData);
+        
+        // Create download link for API blob
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `finsight-report-${new Date().toISOString().split('T')[0]}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        console.log('PDF downloaded successfully via API');
+      } catch (apiErr) {
+        // FALLBACK: Use local PDF generation if API fails
+        console.log('API download failed, using local fallback', apiErr);
+        
+        downloadScoreAsPDF(
+          coachData.final_score || 64,
+          coachData.sector || 'Business',
+          new Date().toLocaleDateString(),
+          { 
+            actionSteps: coachData.action_steps || [],
+            growthTips: coachData.growth_tips || [] 
+          }
+        );
+      }
 
       return true;
     } catch (err) {
